@@ -1,4 +1,4 @@
-import struct, os, sys, time
+import struct, os, sys, time, numpy, math
 from zpr import GLZPR
 
 class BinaryStream:
@@ -22,25 +22,54 @@ class BinaryStream:
     def float32(self):
         return self.unpack("f") 
         
-class Mesh:
+class Bounds:
+    def __init__(self):
+        self.bounds = [sys.maxint,sys.maxint,sys.maxint,-sys.maxint-1,-sys.maxint-1,-sys.maxint-1]
+    def add_xyz(self,x,y,z):
+        self.bounds[0] = min(self.bounds[0],x)
+        self.bounds[1] = min(self.bounds[1],y)
+        self.bounds[2] = min(self.bounds[2],z)
+        self.bounds[3] = max(self.bounds[3],x)
+        self.bounds[4] = max(self.bounds[4],y)
+        self.bounds[5] = max(self.bounds[5],z)
+    def add_bounds(self,bounds):
+        self.bounds[0] = min(self.bounds[0],bounds.bounds[0])
+        self.bounds[1] = min(self.bounds[1],bounds.bounds[1])
+        self.bounds[2] = min(self.bounds[2],bounds.bounds[2])
+        self.bounds[3] = max(self.bounds[3],bounds.bounds[3])
+        self.bounds[4] = max(self.bounds[4],bounds.bounds[4])
+        self.bounds[5] = max(self.bounds[5],bounds.bounds[5])
+    def size(self):
+        w = self.bounds[3]-self.bounds[0]
+        h = self.bounds[4]-self.bounds[1]
+        d = self.bounds[5]-self.bounds[2]
+        return (w,h,d)
+    def centre(self):
+        w,h,d = self.size()
+        x = -self.bounds[0]-(w/2.)
+        y = -self.bounds[1]-(h/2.)
+        z = -self.bounds[2]-(d/2.)
+        return (x,y,z)
+        
+class Mesh(object):
     def __init__(self,g3d):
         self.g3d = g3d
         self.vertices = []
         self.normals = []
         self.indices = []
-        self.txtCoords = None
+        self.txCoords = None
         self.texture = None
-        self.bounds = [sys.maxint,sys.maxint,sys.maxint,-sys.maxint-1,-sys.maxint-1,-sys.maxint-1]
+        self.bounds = []
     def _load_vnt(self,f,frameCount,vertexCount):
         for i in xrange(frameCount):
             vertices = []
+            bounds = Bounds()
             for v in xrange(vertexCount):
                 pt = (f.float32(),f.float32(),f.float32())
                 vertices.append(pt)
-                for i in xrange(3):
-                    self.bounds[i] = min(self.bounds[i],pt[i])
-                    self.bounds[i+3] = max(self.bounds[i+3],pt[i])
+                bounds.add_xyz(*pt)
             self.vertices.append(vertices)
+            self.bounds.append(bounds)
         for i in xrange(frameCount):
             normals = []
             for n in xrange(vertexCount):
@@ -56,9 +85,33 @@ class Mesh:
         for i in xrange(indexCount):
             self.indices.append(f.uint32())
     def analyse(self):
-        print type(self),len(self.vertices),len(self.vertices[0]),len(self.indices)
-        # simple check: are they all the same?
-        
+        print self.__class__.__name__,len(self.vertices),len(self.vertices[0]),len(self.indices),
+        # calculate internal distances
+        def internal_distances(centre,v):
+            ret = numpy.zeros((len(v),),dtype=numpy.double)
+            for i,a in enumerate(v):
+                r = (a[0]*centre[0]+a[1]*centre[1]+a[2]*centre[2])
+                if r > 0:
+                    r = math.sqrt(r)
+                ret[i] = r
+            return ret
+        self.analysis = [None]
+        immutable = True
+        a = internal_distances(self.bounds[0].centre(),self.vertices[0])
+        for i in xrange(1,len(self.vertices)):
+            b = internal_distances(self.bounds[i].centre(),self.vertices[i])
+            analysis = []
+            mutable = False
+            for j in xrange(len(a)):
+                if abs(a[j]-b[j])>0.0001:
+                    immutable = False
+                    mutable = True
+                    analysis.append(False)
+                analysis.append(True)
+            print "x" if mutable else "y",
+            a = b
+            self.analysis.append(analysis if mutable else None)
+        print "IMMUTABLE" if immutable else "mutable"
     def interop(self,now):
         i = (now*5)%len(self.vertices)
         p = int(i)
@@ -80,17 +133,23 @@ class Mesh:
             y = ay-(ay-by)*f
             z = az-(az-bz)*f
             normals.append((x,y,z))
-        return (vertices,normals)
+        return (vertices,normals,self.analysis[p])
     def draw(self,now):
-        vertices, normals = self.interop(now)
+        vertices, normals, analysis = self.interop(now)
         textures = self.txCoords
-        if textures is not None:
+        if (analysis is not None) or (textures is None):
+            glBindTexture(GL_TEXTURE_2D,0)
+            glColor(0,0,0,1)
+        else:
             glBindTexture(GL_TEXTURE_2D,self.texture)
+            glColor(1,1,1,1)
         glBegin(GL_TRIANGLES)
         for i in self.indices:
-            if textures is not None:
+            if analysis is not None:
+                glColor(1 if analysis[i] else 0,0,0,1)
+            elif textures is not None:
                 glTexCoord(*textures[i])
-            glNormal(*normals[i])
+                glNormal(*normals[i])
             glVertex(*vertices[i])
         glEnd()
         
@@ -148,31 +207,33 @@ class G3D:
                 self.meshes.append(Mesh4(self,f))
         else:
             raise Exception("%s unsupported G3D version: %s"%(filename,self.ver))
-        bounds = [sys.maxint,sys.maxint,sys.maxint,-sys.maxint-1,-sys.maxint-1,-sys.maxint-1]
+        bounds = Bounds()
         for mesh in self.meshes:
-            for i in xrange(3):
-                bounds[i] = min(bounds[i],mesh.bounds[i])
-                bounds[i+3] = max(bounds[i+3],mesh.bounds[i+3])
-        w = bounds[3]-bounds[0]
-        h = bounds[4]-bounds[1]
-        d = bounds[5]-bounds[2]
-        x = -bounds[0] - (w/2.)
-        y = -bounds[1] - (h/2.)
-        z = -bounds[2] - (d/2.)
-        s = 1.8/max(w,h,d)
+            for frame in mesh.bounds:
+                bounds.add_bounds(frame)
+        x,y,z = bounds.centre()
+        s = 1.8/max(*bounds.size())
         self.scaling = (x,y,z,s)
     def analyse(self):
         for mesh in self.meshes:
-            mesh.analyse();
+            try:
+                mesh.analyse();
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                sys.exit(e)
     def assign_texture(self,texture):
         texture = os.path.join(os.path.split(self.filename)[0],texture)
         return self.txMgr.assign_texture(texture)
     def draw(self,now):
         glPushMatrix()
-        glScale(self.scaling[3],self.scaling[3],self.scaling[3])
-        glTranslate(self.scaling[0],self.scaling[1],self.scaling[2])
-        for mesh in self.meshes:
-            mesh.draw(now)
+        try:
+            glScale(self.scaling[3],self.scaling[3],self.scaling[3])
+            glTranslate(self.scaling[0],self.scaling[1],self.scaling[2])
+            for mesh in self.meshes:
+                mesh.draw(now)
+        except Exception as e:
+            print e           
         glPopMatrix()
         
 class TextureManager:
@@ -214,6 +275,9 @@ class Scene(GLZPR):
         glEnable(GL_TEXTURE_2D)
         self.txMgr.load_textures()
         gobject.timeout_add(1,self._animate)
+    def analyse(self):
+        for model in self.models:
+            model.analyse()
     def _animate(self):
         if not self._animating:
             self.queue_draw()
