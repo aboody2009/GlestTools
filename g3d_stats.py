@@ -55,6 +55,10 @@ class Mesh:
     def _load_i(self,f,indexCount):
         for i in xrange(indexCount):
             self.indices.append(f.uint32())
+    def analyse(self):
+        print type(self),len(self.vertices),len(self.vertices[0]),len(self.indices)
+        # simple check: are they all the same?
+        
     def interop(self,now):
         i = (now*5)%len(self.vertices)
         p = int(i)
@@ -101,7 +105,6 @@ class Mesh3(Mesh):
         indexCount = f.uint32()
         properties = f.uint32()
         texture = f.text64()
-        print "Mesh3",frameCount,vertexCount,indexCount
         if 0 == (properties & 1):
             self.texture = g3d.assign_texture(texture)
         self._load_vnt(f,frameCount,vertexCount)
@@ -119,7 +122,6 @@ class Mesh4(Mesh):
         f.read(8*4)
         self.properties = properties = f.uint32()
         self.textures = textures = f.uint32()
-        print "Mesh4",self.name,frameCount,vertexCount,indexCount
         if (textures & 1) == 1:
             self.texture = g3d.assign_texture(f.text64())
         self._load_vnt(f,frameCount,vertexCount)
@@ -159,6 +161,9 @@ class G3D:
         z = -bounds[2] - (d/2.)
         s = 1.8/max(w,h,d)
         self.scaling = (x,y,z,s)
+    def analyse(self):
+        for mesh in self.meshes:
+            mesh.analyse();
     def assign_texture(self,texture):
         texture = os.path.join(os.path.split(self.filename)[0],texture)
         return self.txMgr.assign_texture(texture)
@@ -226,27 +231,30 @@ class Scene(GLZPR):
             model.draw(now)
         
 if __name__ == "__main__":
-    import pygtk; pygtk.require('2.0')
-    import gtk, gtk.gdk as gdk, gtk.gtkgl as gtkgl, gtk.gdkgl as gdkgl, gobject
-    from OpenGL.GL import *
-    from OpenGL.GLU import *
-    from OpenGL.GLUT import *
-    glutInit(sys.argv)
-
     if len(sys.argv) != 2:
         sys.exit("Usage: python g3d_stats.py [model.g3d]")
 
-    scene = Scene()
-    scene.add(sys.argv[1])
-
-    gtk.gdk.threads_init()
-    window = gtk.Window(gtk.WINDOW_TOPLEVEL)
-    window.set_title("G3D Stats")
-    window.set_size_request(640,480)
-    window.connect("destroy",lambda event: gtk.main_quit())
-    vbox = gtk.VBox(False, 0)
-    window.add(vbox)
-    vbox.pack_start(scene,True,True)
-    window.show_all()
-    gtk.main()
+    if len(sys.argv) == 2:
+        
+        import pygtk; pygtk.require('2.0')
+        import gtk, gtk.gdk as gdk, gtk.gtkgl as gtkgl, gtk.gdkgl as gdkgl, gobject
+        from OpenGL.GL import *
+        from OpenGL.GLU import *
+        from OpenGL.GLUT import *
+        glutInit(())
+    
+        scene = Scene()
+        scene.add(sys.argv[1])
+        scene.analyse()
+    
+        gtk.gdk.threads_init()
+        window = gtk.Window(gtk.WINDOW_TOPLEVEL)
+        window.set_title("G3D Stats")
+        window.set_size_request(640,480)
+        window.connect("destroy",lambda event: gtk.main_quit())
+        vbox = gtk.VBox(False, 0)
+        window.add(vbox)
+        vbox.pack_start(scene,True,True)
+        window.show_all()
+        gtk.main()
 
