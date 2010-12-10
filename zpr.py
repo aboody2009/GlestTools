@@ -92,7 +92,12 @@ class GLZPR(gtkgl.DrawingArea):
         
     def _init(self,widget):
         assert(widget == self)
-        self.init() ### optionally overriden by subclasses
+        try:
+            self.init() ### optionally overriden by subclasses
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            gtk.main_quit()
         return True
         
     def reset(self):
@@ -276,13 +281,18 @@ class GLZPR(gtkgl.DrawingArea):
 
     def _draw(self,widget,event):
         assert(self == widget)   
-        with self.open_context() as ctx:
-            glMatrixMode(GL_MODELVIEW)
-            self.draw(event) ### implemented by subclasses
-            if ctx.surface.is_double_buffered():
-                ctx.surface.swap_buffers()
-            else:
-                glFlush()
+        try:
+            with self.open_context() as ctx:
+                glMatrixMode(GL_MODELVIEW)
+                self.draw(event) ### implemented by subclasses
+                if ctx.surface.is_double_buffered():
+                    ctx.surface.swap_buffers()
+                else:
+                    glFlush()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            gtk.main_quit()
         return True
 
 def _demo_draw(event):
