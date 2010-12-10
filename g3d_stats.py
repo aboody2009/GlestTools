@@ -78,73 +78,33 @@ class Mesh3(Mesh):
         normalCount = f.uint32()
         texCoordCount = f.uint32()
         colorCount = f.uint32()
-        pointCount = f.uint32()
+        vertexCount = f.uint32()
         indexCount = f.uint32()
         properties = f.uint32()
         texture = f.text64()
+        print "Mesh3",frameCount,vertexCount,indexCount
         if 0 == (properties & 1):
             self.texture = g3d.assign_texture(texture)
-        self._load_vnt(f,frameCount,pointCount)
+        self._load_vnt(f,frameCount,vertexCount)
         f.read(16)
         f.read(16*(colorCount-1))
         self._load_i(f,indexCount)   
         
-class Mesh4:
+class Mesh4(Mesh):
     def __init__(self,g3d,f):
-        self.g3d = g3d
-        self.vertices = []
-        self.normals = []
-        self.indices = []
-        self.txCoords = None
-        self.bounds = [sys.maxint,sys.maxint,sys.maxint,-sys.maxint-1,-sys.maxint-1,-sys.maxint-1]
+        Mesh.__init__(self,g3d)
         self.name = f.text64()
         frameCount = f.uint32()
         vertexCount = f.uint32()
         indexCount = f.uint32()
-        print "Mesh4",self.name,frameCount,vertexCount,indexCount
         f.read(8*4)
         self.properties = properties = f.uint32()
         self.textures = textures = f.uint32()
-        self.texture = None
+        print "Mesh4",self.name,frameCount,vertexCount,indexCount
         if (textures & 1) == 1:
             self.texture = g3d.assign_texture(f.text64())
-        for i in xrange(frameCount):
-            vertices = []
-            for v in xrange(vertexCount):
-                pt = (f.float32(),f.float32(),f.float32())
-                vertices.append(pt)
-                for i in xrange(3):
-                    self.bounds[i] = min(self.bounds[i],pt[i])
-                    self.bounds[i+3] = max(self.bounds[i+3],pt[i])
-            self.vertices.append(vertices)
-        for i in xrange(frameCount):
-            normals = []
-            for n in xrange(vertexCount):
-                pt = (f.float32(),f.float32(),f.float32())
-                normals.append(pt)
-            self.normals.append(normals)
-        if self.texture is not None:
-            self.txCoords = []
-            for v in xrange(vertexCount):
-                pt = (f.float32(),f.float32())
-                self.txCoords.append(pt)
-        for i in xrange(indexCount):
-            self.indices.append(f.uint32())
-    def draw(self,now):
-        i = int((now*5)%len(self.vertices))
-        print now,i
-        vertices = self.vertices[i]
-        normals = self.normals[i]
-        textures = self.txCoords
-        if textures is not None:
-            glBindTexture(GL_TEXTURE_2D,self.texture)
-        glBegin(GL_TRIANGLES)
-        for i in self.indices:
-            if textures is not None:
-                glTexCoord(*textures[i])
-            glNormal(*normals[i])
-            glVertex(*vertices[i])
-        glEnd()
+        self._load_vnt(f,frameCount,vertexCount)
+        self._load_i(f,frameCount,vertexCount)
     
 class G3D:
     def __init__(self,txMgr,filename):
