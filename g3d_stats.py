@@ -55,11 +55,30 @@ class Mesh:
     def _load_i(self,f,indexCount):
         for i in xrange(indexCount):
             self.indices.append(f.uint32())
+    def interop(self,now):
+        i = (now*5)%len(self.vertices)
+        p = int(i)
+        n = (p+1)%len(self.vertices)
+        f = i%1.
+        vertices = []
+        for a,b in zip(self.vertices[p],self.vertices[n]):
+            ax,ay,az = a
+            bx,by,bz = b
+            x = ax-(ax-bx)*f
+            y = ay-(ay-by)*f
+            z = az-(az-bz)*f
+            vertices.append((x,y,z))
+        normals = []
+        for a,b in zip(self.normals[p],self.normals[n]):
+            ax,ay,az = a
+            bx,by,bz = b
+            x = ax-(ax-bx)*f
+            y = ay-(ay-by)*f
+            z = az-(az-bz)*f
+            normals.append((x,y,z))
+        return (vertices,normals)
     def draw(self,now):
-        i = int((now*5)%len(self.vertices))
-        print now,i
-        vertices = self.vertices[i]
-        normals = self.normals[i]
+        vertices, normals = self.interop(now)
         textures = self.txCoords
         if textures is not None:
             glBindTexture(GL_TEXTURE_2D,self.texture)
@@ -104,7 +123,7 @@ class Mesh4(Mesh):
         if (textures & 1) == 1:
             self.texture = g3d.assign_texture(f.text64())
         self._load_vnt(f,frameCount,vertexCount)
-        self._load_i(f,frameCount,vertexCount)
+        self._load_i(f,indexCount)
     
 class G3D:
     def __init__(self,txMgr,filename):
@@ -184,15 +203,22 @@ class Scene(GLZPR):
         self.txMgr = TextureManager()
         self.models = []
         self.start = time.time()
+        self._animating = False
     def init(self):
         GLZPR.init(self)
         glEnable(GL_TEXTURE_2D)
         self.txMgr.load_textures()
-        import gobject
-        gobject.timeout_add(100,lambda: self.queue_draw() or True)
+        gobject.timeout_add(1,self._animate)
+    def _animate(self):
+        if not self._animating:
+            self.queue_draw()
+            self._animating = True
     def add(self,filename):
         self.models.append(G3D(self.txMgr,filename))
     def draw(self,event):
+        if self._animating:
+            gobject.timeout_add(1,self._animate)
+            self._animating = False
         now = time.time() - self.start
         glClearColor(1.,1.,.9,1.)
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
@@ -201,7 +227,7 @@ class Scene(GLZPR):
         
 if __name__ == "__main__":
     import pygtk; pygtk.require('2.0')
-    import gtk, gtk.gdk as gdk, gtk.gtkgl as gtkgl, gtk.gdkgl as gdkgl
+    import gtk, gtk.gdk as gdk, gtk.gtkgl as gtkgl, gtk.gdkgl as gdkgl, gobject
     from OpenGL.GL import *
     from OpenGL.GLU import *
     from OpenGL.GLUT import *
