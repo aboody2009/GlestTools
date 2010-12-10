@@ -1,4 +1,5 @@
 import struct, os, sys, time, numpy, math
+from numpy import float_ as precision
 from zpr import GLZPR
 
 class BinaryStream:
@@ -54,41 +55,41 @@ class Bounds:
 class Mesh(object):
     def __init__(self,g3d):
         self.g3d = g3d
-        self.vertices = []
-        self.normals = []
-        self.indices = []
         self.txCoords = None
         self.texture = None
         self.bounds = []
     def _load_vnt(self,f,frameCount,vertexCount):
+        self.vertices = []
         for i in xrange(frameCount):
-            vertices = []
+            vertices = numpy.zeros((vertexCount,3),dtype=precision)
             bounds = Bounds()
             for v in xrange(vertexCount):
                 pt = (f.float32(),f.float32(),f.float32())
-                vertices.append(pt)
+                vertices[v] = pt
                 bounds.add_xyz(*pt)
             self.vertices.append(vertices)
             self.bounds.append(bounds)
+        self.normals = []
         for i in xrange(frameCount):
-            normals = []
+            normals = numpy.zeros((vertexCount,3),dtype=precision)
             for n in xrange(vertexCount):
                 pt = (f.float32(),f.float32(),f.float32())
-                normals.append(pt)
+                normals[n] = pt
             self.normals.append(normals)
         if self.texture is not None:
-            self.txCoords = []
+            self.txCoords = numpy.zeros((vertexCount,2),dtype=precision)
             for v in xrange(vertexCount):
                 pt = (f.float32(),f.float32())
-                self.txCoords.append(pt)
+                self.txCoords[v] = pt
     def _load_i(self,f,indexCount):
+        self.indices = numpy.zeros(indexCount,dtype=numpy.uint32)
         for i in xrange(indexCount):
-            self.indices.append(f.uint32())
+            self.indices[i] = f.uint32()
     def analyse(self):
         print self.__class__.__name__,len(self.vertices),len(self.vertices[0]),len(self.indices),
         # calculate internal distances
         def internal_distances(centre,v):
-            ret = numpy.zeros((len(v),),dtype=numpy.double)
+            ret = numpy.zeros((len(v),),dtype=precision)
             for i,a in enumerate(v):
                 r = (a[0]*centre[0]+a[1]*centre[1]+a[2]*centre[2])
                 if r > 0:
@@ -117,22 +118,17 @@ class Mesh(object):
         p = int(i)
         n = (p+1)%len(self.vertices)
         f = i%1.
-        vertices = []
-        for a,b in zip(self.vertices[p],self.vertices[n]):
-            ax,ay,az = a
-            bx,by,bz = b
-            x = ax-(ax-bx)*f
-            y = ay-(ay-by)*f
-            z = az-(az-bz)*f
-            vertices.append((x,y,z))
-        normals = []
-        for a,b in zip(self.normals[p],self.normals[n]):
-            ax,ay,az = a
-            bx,by,bz = b
-            x = ax-(ax-bx)*f
-            y = ay-(ay-by)*f
-            z = az-(az-bz)*f
-            normals.append((x,y,z))
+        def inter(a,b):
+            ret = numpy.zeros((len(a),3),dtype=precision)
+            for i in xrange(len(a)):
+                ax,ay,az = a[i]
+                bx,by,bz = b[i]
+                ret[i,0] = ax-(ax-bx)*f
+                ret[i,1] = ay-(ay-by)*f
+                ret[i,2] = az-(az-bz)*f
+            return ret
+        vertices = inter(self.vertices[p],self.vertices[n])
+        normals = inter(self.normals[p],self.normals[n])
         return (vertices,normals,self.analysis[p])
     def draw(self,now):
         vertices, normals, analysis = self.interop(now)
