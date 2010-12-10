@@ -20,7 +20,74 @@ class BinaryStream:
     def uint32(self):
         return self.unpack("<I")
     def float32(self):
-        return self.unpack("f")            
+        return self.unpack("f") 
+        
+class Mesh:
+    def __init__(self,g3d):
+        self.g3d = g3d
+        self.vertices = []
+        self.normals = []
+        self.indices = []
+        self.txtCoords = None
+        self.texture = None
+        self.bounds = [sys.maxint,sys.maxint,sys.maxint,-sys.maxint-1,-sys.maxint-1,-sys.maxint-1]
+    def _load_vnt(self,f,frameCount,vertexCount):
+        for i in xrange(frameCount):
+            vertices = []
+            for v in xrange(vertexCount):
+                pt = (f.float32(),f.float32(),f.float32())
+                vertices.append(pt)
+                for i in xrange(3):
+                    self.bounds[i] = min(self.bounds[i],pt[i])
+                    self.bounds[i+3] = max(self.bounds[i+3],pt[i])
+            self.vertices.append(vertices)
+        for i in xrange(frameCount):
+            normals = []
+            for n in xrange(vertexCount):
+                pt = (f.float32(),f.float32(),f.float32())
+                normals.append(pt)
+            self.normals.append(normals)
+        if self.texture is not None:
+            self.txCoords = []
+            for v in xrange(vertexCount):
+                pt = (f.float32(),f.float32())
+                self.txCoords.append(pt)
+    def _load_i(self,f,indexCount):
+        for i in xrange(indexCount):
+            self.indices.append(f.uint32())
+    def draw(self,now):
+        i = int((now*5)%len(self.vertices))
+        print now,i
+        vertices = self.vertices[i]
+        normals = self.normals[i]
+        textures = self.txCoords
+        if textures is not None:
+            glBindTexture(GL_TEXTURE_2D,self.texture)
+        glBegin(GL_TRIANGLES)
+        for i in self.indices:
+            if textures is not None:
+                glTexCoord(*textures[i])
+            glNormal(*normals[i])
+            glVertex(*vertices[i])
+        glEnd()
+        
+class Mesh3(Mesh):
+    def __init__(self,g3d,f):
+        Mesh.__init__(self,g3d)
+        frameCount = f.uint32()
+        normalCount = f.uint32()
+        texCoordCount = f.uint32()
+        colorCount = f.uint32()
+        pointCount = f.uint32()
+        indexCount = f.uint32()
+        properties = f.uint32()
+        texture = f.text64()
+        if 0 == (properties & 1):
+            self.texture = g3d.assign_texture(texture)
+        self._load_vnt(f,frameCount,pointCount)
+        f.read(16)
+        f.read(16*(colorCount-1))
+        self._load_i(f,indexCount)   
         
 class Mesh4:
     def __init__(self,g3d,f):
@@ -84,29 +151,33 @@ class G3D:
         self.filename = filename
         self.txMgr = txMgr
         self.meshes = []
-        self.bounds = [sys.maxint,sys.maxint,sys.maxint,-sys.maxint-1,-sys.maxint-1,-sys.maxint-1]
         f = BinaryStream(filename)
         if f.read(3) != "G3D":
             raise Exception("%s is not a G3D file"%filename)
         self.ver = f.uint8()
-        if self.ver == 4:
+        if self.ver == 3:
+            meshCount = f.uint32()
+            for mesh in xrange(meshCount):
+                self.meshes.append(Mesh3(self,f))
+        elif self.ver == 4:
             meshCount = f.uint16()
             if f.uint8() != 0:
                 raise Exception("%s is not mtMorphMesh!"%filename)
             for mesh in xrange(meshCount):
-                mesh = Mesh4(self,f)
-                self.meshes.append(mesh)
-                for i in xrange(3):
-                    self.bounds[i] = min(self.bounds[i],mesh.bounds[i])
-                    self.bounds[i+3] = max(self.bounds[i+3],mesh.bounds[i+3])
+                self.meshes.append(Mesh4(self,f))
         else:
             raise Exception("%s unsupported G3D version: %s"%(filename,self.ver))
-        w = self.bounds[3]-self.bounds[0]
-        h = self.bounds[4]-self.bounds[1]
-        d = self.bounds[5]-self.bounds[2]
-        x = -self.bounds[0] - (w/2.)
-        y = -self.bounds[1] - (h/2.)
-        z = -self.bounds[2] - (d/2.)
+        bounds = [sys.maxint,sys.maxint,sys.maxint,-sys.maxint-1,-sys.maxint-1,-sys.maxint-1]
+        for mesh in self.meshes:
+            for i in xrange(3):
+                bounds[i] = min(bounds[i],mesh.bounds[i])
+                bounds[i+3] = max(bounds[i+3],mesh.bounds[i+3])
+        w = bounds[3]-bounds[0]
+        h = bounds[4]-bounds[1]
+        d = bounds[5]-bounds[2]
+        x = -bounds[0] - (w/2.)
+        y = -bounds[1] - (h/2.)
+        z = -bounds[2] - (d/2.)
         s = 1.8/max(w,h,d)
         self.scaling = (x,y,z,s)
     def assign_texture(self,texture):
