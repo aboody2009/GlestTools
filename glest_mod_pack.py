@@ -354,7 +354,7 @@ class Mod:
                 try:
                     if player.attributes["control"].value != "closed":
                         factions.add(player.attributes["faction"].value)
-                except Exception as e:
+                except Exception,e:
                     print player.toxml(),e
             def unresolved(f,typ,name):
                 if self.is_extension:
@@ -440,13 +440,13 @@ class Mod:
                     f.read(4*indexCount)
             else:
                 model.error("Unsupported G3D version"+ver)
-        except Exception as e:
+        except Exception,e:
             model.error("Error reading G3D file",e)
     def _listdir(self,path,*filters):
         path = os.path.join(self.base_folder,path)
         try:
             return [f for f in map(lambda x: os.path.join(path,x),os.listdir(path)) if all([ftr(f) for ftr in filters])]
-        except OSError as e:
+        except OSError,e:
             if e.errno == 2: # file not found
                 return []
             raise
@@ -663,7 +663,7 @@ def main(argv):
         for f,reason in sorted(mod.broken.items(),lambda x,y: x[0].sortorder(y[0])):
             try:
                 print f,", ".join(str(r) for r in reason)
-            except Exception as e:
+            except Exception,e:
                 print "ERROR",f
                 print "REASON",reason
                 raise
@@ -761,10 +761,10 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print "\naborting!"
         os._exit(1)
-    except SystemExit as se:
+    except SystemExit,se:
         if se.code != 1:
             print "Error:",se.code
-    except Exception as e:
+    except Exception,e:
         print "An error has occurred:"
         import traceback
         traceback.print_exc()
