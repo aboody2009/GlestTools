@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 # glest_mod_pack is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -66,7 +68,7 @@ class File:
         if not self.broken and os.path.splitext(self.path)[1] == ".xml":
             try:
                 self.xml = mod._init_xml(self)
-            except Exception as e:
+            except Exception,e:
                 self.error(("Error reading xml",str(e)))
                 raise
     def error(self,*args):

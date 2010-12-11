@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import struct, os, sys, time, numpy, math
 from numpy import float_ as precision
 
