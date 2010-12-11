@@ -200,6 +200,32 @@ def parse_mod_name(name):
         return
     modname.append(tuple(ver))
     return modname
+    
+def confirm(prompt,default=False):
+    if default:
+        prompt = "\n%s [y]n: "%prompt
+    else:
+        prompt = "\n%s y[n]: "%prompt
+    while True:
+        ch = raw_input(prompt)
+        if not ch:
+            return default
+        if ch in "yY":
+            return True
+        if ch in "nN":
+            return False
+        print "please answer y or n"
+                    
+def query(prompt,*choices):
+    prompt = "\n%s (%s): "%(prompt,", ".join(c[0] for c in choices))
+    while True:
+        ch = raw_input(prompt)
+        if ch:
+            ch = ch.lower()
+            for c in choices:
+                if ch in c[1].lower():
+                    return c[1].lower()[0]
+        print "Please answer the question!"
 
 class Mod:
     def __init__(self,base_folder,external):
@@ -210,12 +236,18 @@ class Mod:
         self.name = parse_mod_name(os.path.split(self.base_folder)[1])
         if self.name is None:
             print help_modname
-            sys.exit(1)
-        part = []
-        for x in xrange(len(self.name),0,-2):
-            part.append("%s %s"%(self.name[x-2],".".join(str(v) for v in self.name[x-1])))
-        print "=== Mod"," extends ".join(part),"==="
-        self.is_extension = (len(self.name) > 2)
+            if not confirm("would you like to continue just to check your content anyway?"):
+                sys.exit(1)
+            self.name = (os.path.split(self.base_folder)[1],"1")
+            self.is_extension = True
+            self.bad_name = True
+        else:
+            part = []
+            for x in xrange(len(self.name),0,-2):
+                part.append("%s %s"%(self.name[x-2],".".join(str(v) for v in self.name[x-1])))
+            print "=== Mod"," extends ".join(part),"==="
+            self.is_extension = (len(self.name) > 2)
+            self.bad_name = False
         self.maps = set()
         self.scenarios = set()
         self.factions = set()
@@ -540,32 +572,6 @@ class Mod:
 """
         return self._manifest
                         
-def confirm(prompt,default=False):
-    if default:
-        prompt = "\n%s [y]n: "%prompt
-    else:
-        prompt = "\n%s y[n]: "%prompt
-    while True:
-        ch = raw_input(prompt)
-        if not ch:
-            return default
-        if ch in "yY":
-            return True
-        if ch in "nN":
-            return False
-        print "please answer y or n"
-                    
-def query(prompt,*choices):
-    prompt = "\n%s (%s): "%(prompt,", ".join(c[0] for c in choices))
-    while True:
-        ch = raw_input(prompt)
-        if ch:
-            ch = ch.lower()
-            for c in choices:
-                if ch in c[1].lower():
-                    return c[1].lower()[0]
-        print "Please answer the question!"
-
 def fmt_bytes(b):
     for m in ["B","KB","MB","GB"]:
         if b < 1024:
@@ -593,12 +599,12 @@ def main(argv):
         print "Usage: python",argv[0],"[mod_root_dir]"
         print help_modname
         sys.exit(1)
-    print "Analysing",argv[1],"if this is a big mod, you might want to go get a coffee..."
     time_start = time.time()
     
     # make a list of all known mods
     base_folder = os.path.abspath(argv[1])
     root_folder = os.path.split(base_folder)[0]
+    print "Analysing",base_folder,"if this is a big mod, you might want to go get a coffee..."
     mods = []
     for mod in os.listdir(root_folder):
         path = os.path.join(root_folder,mod)
