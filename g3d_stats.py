@@ -103,6 +103,8 @@ class Mesh(object):
                 (a[1]-b[1])**2 +
                 (a[2]-b[2])**2)
         def feq(a,b):
+            if precision == numpy.double:
+                return abs(a-b) < 0.00000001
             return abs(a-b) < 0.000001
         self.analysis = [None]
         i = self.indices
@@ -162,7 +164,7 @@ class Mesh(object):
                     glBegin(GL_TRIANGLES)
             elif textures is not None:
                 glTexCoord(*textures[i])
-                glNormal(*normals[i])
+            glNormal(*normals[i])
             glVertex(*vertices[i])
         glEnd()
         
@@ -284,7 +286,7 @@ class Manager:
                 glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR)
                 glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR)
                 glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,w,h,0,GL_RGB,GL_UNSIGNED_BYTE,image)
-            except Exception as e:
+            except Exception,e:
                 print "Could not load texture",filename,"->",texture
                 print e
         
@@ -353,7 +355,7 @@ if __name__ == "__main__":
             window.show_all()
             gtk.main()
             sys.exit(0)
-        except Exception as e:
+        except Exception,e:
             import traceback; traceback.print_exc()
             print "Could not display 3D using OpenGL and GTK with ZPR"
            

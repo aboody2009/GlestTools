@@ -373,7 +373,7 @@ class Mod:
         f.name = name
         assert f.broken or (f.xml.documentElement.tagName == "resource"), f
     def _init_particle(self,f):
-        assert f.broken or (f.xml.documentElement.tagName.endswith("-particle-system")),"%s %s"%(f,f.xml.documentElement.tagName)
+        assert f.broken or (f.xml.documentElement.tagName.endswith("particle-system")),"%s %s"%(f,f.xml.documentElement.tagName)
     def _init_scenarios(self):
         for f in self._listdir("scenarios",os.path.isdir):
             name = os.path.split(f)[1]
@@ -609,7 +609,7 @@ def main(argv):
     for mod in os.listdir(root_folder):
         path = os.path.join(root_folder,mod)
         if os.path.isfile(path):
-            if os.path.splitext(mod)[1] in [".zip",".zip.xy"]:
+            if os.path.splitext(mod)[1] in [".zip",".zip.xz"]:
                 mod = os.path.splitext(mod)[0]
             else:
                 continue
@@ -686,7 +686,7 @@ This tool has some experimental optimisations:
   Inside the zip file, the G3D and XML files that reference the file are
   rewritten but NO CHANGES ARE MADE to the files on your disk!
   If you later choose Zip compression, then users get a much smaller download.
-  If you chose XY compression, then players use less diskspace when they've
+  If you chose XZ compression, then players use less diskspace when they've
   uncompressed your mod, so its seems always a good idea..."""
     optimise = confirm("Should we perform some (experimental!) optimisations?")
     if optimise:
@@ -698,14 +698,14 @@ This tool has some experimental optimisations:
 There are two formats for packaging mods, and these choices affect file size:
 * ZIP compression is very portable, and suitable even for Classic Glest users
   ZIP files will also take less space on GAE players harddisks
-* XY offers smaller downloads, but GAE users will use as much diskspace
-  as MG and Classic Glest users.  XY is intended to be used eventually by the
+* XZ offers smaller downloads, but GAE users will use as much diskspace
+  as MG and Classic Glest users.  XZ is intended to be used eventually by the
   automated mod managing tools (which I plan to write).
   It offers better partial-update download sizes too, if you are making an
   upgrade of an existing mod.  Power users will be able to use these files
   manually, but most Classic Glest players will be unsure what to do with them!
-  (XY takes a lot longer to pack, so if you are impatient go with ZIP)"""
-    fmt = query("What compression choice do you want to use?",("z=zip","z"),("x=xy","x"))
+  (XZ takes a lot longer to pack, so if you are impatient go with ZIP)"""
+    fmt = query("What compression choice do you want to use?",("z=zip","z"),("x=xz","x"))
     out_filename = os.path.abspath(os.path.join(mod.base_folder,"../%s.zip"%os.path.split(mod.base_folder)[1]))
     if os.path.exists(out_filename) and \
         not confirm("The file %s already exists; proceeding will re-create it; are you sure?"%out_filename):
@@ -716,7 +716,7 @@ There are two formats for packaging mods, and these choices affect file size:
             archive = zipfile.ZipFile(out_filename,"w",zipfile.ZIP_DEFLATED)
             print
             print "Compressing mod using zip, please wait... (go get more coffee!)"
-        elif (fmt == "x"): #xy
+        elif (fmt == "x"): #xz
             archive = zipfile.ZipFile(out_filename,"w",zipfile.ZIP_STORED)
             print "Stage 1: storing all files in a zip..."
         else:
