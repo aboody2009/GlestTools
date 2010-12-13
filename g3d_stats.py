@@ -184,7 +184,7 @@ class Mesh(object):
             glColor(0,1,0,1)
             immutable = False
         else:
-            bind_texture_gl(self.texture)
+            glBindTexture(GL_TEXTURE_2D,self.texture)
             glColor(1,1,1,1)
         glBegin(GL_TRIANGLES)
         for j,i in enumerate(self.indices):
@@ -337,13 +337,6 @@ class Manager:
         return self.meshes[mesh]
     def resolve_mesh(self,v):
         return self.mesh_reverse[v]
-    def bind_texture_gl(self,texture):
-        glBindTexture(GL_TEXTURE_2D,texture)
-        if self.opaque_textures.contains(texture):
-            glEnable(GL_CULL_FACE)
-            print "Culling",texture
-        else:
-            glDisable(GL_CULL_FACE)
     def load_textures_gl(self):
         import Image
         for filename,texture in self.textures.iteritems():
