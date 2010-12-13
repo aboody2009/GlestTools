@@ -384,7 +384,7 @@ if __name__ == "__main__":
                     self.render_speed = 10
                     self.render_normals = True
                     self.render_analysis = True
-                    self.cull_faces = True
+                    self.cull_faces = False
                 def init(self):
                     GLZPR.init(self)
                     glEnable(GL_TEXTURE_2D)
@@ -394,6 +394,11 @@ if __name__ == "__main__":
                     glFrontFace(GL_CCW)
                     glEnable(GL_NORMALIZE)
                     glEnable(GL_BLEND)
+                    glLightfv(GL_LIGHT0,GL_AMBIENT,(.3,.3,.3,1))
+                    glLightfv(GL_LIGHT0,GL_DIFFUSE,(1,1,1,1))
+                    glLightfv(GL_LIGHT0,GL_SPECULAR,(.1,.1,.1,1))
+                    glColorMaterial(GL_FRONT_AND_BACK,GL_AMBIENT_AND_DIFFUSE)
+                    glEnable(GL_COLOR_MATERIAL)
                     self.load_textures_gl()
                     gobject.timeout_add(1,self._animate)
                 def _animate(self):

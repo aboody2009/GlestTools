@@ -100,7 +100,7 @@ class GLZPR(gtkgl.DrawingArea):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            gtk.main_quit()
+            return False
         return True
         
     def reset(self):
