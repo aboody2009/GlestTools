@@ -31,6 +31,23 @@ from struct import unpack
 from itertools import chain
 import zipfile, time
 
+try:
+    relpath2 = os.path.relpath
+except:
+    print "(using portable relpath)"
+    def relpath2(path, start):
+        if not path:
+            raise ValueError("no path specified")
+        start_list = os.path.abspath(start).split(os.sep)
+        path_list = os.path.abspath(path).split(os.sep)
+        # Work out how much of the filepath is shared by start and path.
+        i = len(os.path.commonprefix([start_list,path_list]))
+        rel_list = [os.pardir] * (len(start_list)-i) + path_list[i:]
+        if not rel_list:
+            return start
+        return os.path.join(*rel_list)
+        
+
 class File:
     """a file (type and path)"""
     MAP = "map"
@@ -55,7 +72,7 @@ class File:
         self.broken = False
         self.inited = False
         self.path = path
-        self.modpath = os.path.relpath(path,mod.base_folder).replace("\\","/").lower();
+        self.modpath = relpath2(path,mod.base_folder).replace("\\","/").lower();
         if not os.path.isfile(self.path):
             self.error("Does not exist")
         elif self.modpath.startswith("..") or self.modpath.startswith("/"):
@@ -130,7 +147,7 @@ class Files:
         return f
     def realpath(self,path):
         assert os.path.isabs(path)
-        rel = os.path.relpath(path,self.mod.base_folder)
+        rel = relpath2(path,self.mod.base_folder)
         assert not rel.startswith(".."),path
         if not os.path.isfile(path):
             found = self.mod.base_folder
@@ -521,7 +538,7 @@ class Mod:
             error = False
             print "Removing duplicate",d.modpath,fmt_bytes(d.filesize),"->",d.dup.modpath
             for referrer in d.referenced_by:
-                relpath = os.path.relpath(d.dup.modpath,os.path.split(referrer.modpath)[0]).replace("\\","/")
+                relpath = relpath2(d.dup.modpath,os.path.split(referrer.modpath)[0]).replace("\\","/")
                 for r in relpath:
                     if r not in legal_path_chars:
                         errors.add("%s contains illegal characters"%relpath)
@@ -639,7 +656,7 @@ def main(argv):
                 filesize = fmt_bytes(os.path.getsize(f))
             except:
                 filesize = "(no size!)"
-            print "Ignoring",os.path.relpath(f,mod.base_folder),filesize
+            print "Ignoring",relpath2(f,mod.base_folder),filesize
         print "=== Ignored:",len(mod.files.ignored),fmt_bytes(ignored),"==="
     time_stop = time.time()
     print "=== (Analysis took %0.1f seconds) =="%(time_stop-time_start)
