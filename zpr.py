@@ -16,8 +16,7 @@ import gtk, gtk.gdk as gdk, gtk.gtkgl as gtkgl, gtk.gdkgl as gdkgl
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
-import math
-from numpy import matrix
+import math, numpy
 
 class GLZPR(gtkgl.DrawingArea):
     def __init__(self,w=640,h=480):
@@ -159,7 +158,7 @@ class GLZPR(gtkgl.DrawingArea):
                 ax, ay, az = dy, dx, 0.
                 viewport = glGetIntegerv(GL_VIEWPORT)
                 angle = math.sqrt(ax**2+ay**2+az**2)/float(viewport[2]+1)*180.0
-                inv = matrix(glGetDoublev(GL_MODELVIEW_MATRIX)).I
+                inv = numpy.matrix(glGetDoublev(GL_MODELVIEW_MATRIX)).I
                 bx = inv[0,0]*ax + inv[1,0]*ay + inv[2,0]*az
                 by = inv[0,1]*ax + inv[1,1]*ay + inv[2,1]*az
                 bz = inv[0,2]*ax + inv[1,2]*ay + inv[2,2]*az

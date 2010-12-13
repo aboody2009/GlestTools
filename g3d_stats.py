@@ -70,7 +70,7 @@ class Mesh(object):
         self.out_vertices = 0
         self.out_indices = 0
         self.out_matrices = 0
-    def _load_vnt(self,f,frameCount,vertexCount):
+    def _load_vn(self,f,frameCount,vertexCount):
         self.vertices = []
         for i in xrange(frameCount):
             vertices = numpy.zeros((vertexCount,3),dtype=precision)
@@ -88,12 +88,13 @@ class Mesh(object):
                 pt = (f.float32(),f.float32(),f.float32())
                 normals[n] = pt
             self.normals.append(normals)
-        if self.texture is not None:
-            self.txCoords = numpy.zeros((vertexCount,2),dtype=precision)
+        self.in_vertices = (frameCount*vertexCount)
+    def _load_t(self,f,frameCount,vertexCount):
+        self.txCoords = numpy.zeros((frameCount,vertexCount,2),dtype=precision)
+        for i in xrange(frameCount):
             for v in xrange(vertexCount):
                 pt = (f.float32(),f.float32())
-                self.txCoords[v] = pt
-        self.in_vertices = (frameCount*vertexCount)
+                self.txCoords[i,v] = pt
     def _load_i(self,f,indexCount):
         assert indexCount % 3 == 0, "incomplete triangles (%s)"%indexCount
         self.indices = numpy.zeros((indexCount/3,3),dtype=numpy.uint32)
@@ -150,7 +151,7 @@ class Mesh(object):
         if verbosity > 1: print ("IMMUTABLE" if len(self.vertices)>1 else "immutable") if immutable else "mutable"
         if count_mutable > 0:
             self.out_vertices *= count_mutable
-            self.out_matrices = len(self.vertices)-1-count_mutable
+        self.out_matrices = len(self.vertices)-1-count_mutable
         self.out_indices = self.in_indices
     def interop(self,now):
         i = (now*5)%len(self.vertices)
@@ -168,10 +169,15 @@ class Mesh(object):
             return ret
         vertices = inter(self.vertices[p],self.vertices[n])
         normals = inter(self.normals[p],self.normals[n])
-        return (vertices,normals,self.analysis[p])
-    def draw(self,now):
-        vertices, normals, analysis = self.interop(now)
-        textures = self.txCoords
+        if self.txCoords is not None:
+            i = int((now*5)%len(self.txCoords))
+            textures = self.txCoords[i]
+        else:
+            textures = None
+        return (vertices,normals,self.analysis[p],textures)
+    def draw_gl(self,now,analyse):
+        vertices, normals, analysis, textures = self.interop(now)
+        if not analyse: analysis = None
         if (analysis is not None) or (textures is None):
             glBindTexture(GL_TEXTURE_2D,0)
             glColor(0,1,0,1)
@@ -197,14 +203,6 @@ class Mesh(object):
 class Mesh3(Mesh):
     def __init__(self,g3d,f):
         Mesh.__init__(self,g3d)
-# uint32 vertexFrameCount;
-# uint32 normalFrameCount;
-# uint32 texCoordFrameCount;
-# uint32 colorFrameCount;
-# uint32 pointCount;
-# uint32 indexCount;
-# uint32 properties;
-# uint8 texName[64];
         frameCount = f.uint32()
         normalCount = f.uint32()
         texCoordCount = f.uint32()
@@ -212,13 +210,12 @@ class Mesh3(Mesh):
         vertexCount = f.uint32()
         indexCount = f.uint32()
         properties = f.uint32()
-        print frameCount,normalCount,texCoordCount,colorCount,vertexCount,indexCount,properties
         texture = f.text64()
         if 0 == (properties & 1):
             self.texture = g3d.assign_texture(texture)
-        self._load_vnt(f,frameCount,vertexCount)
-        for i in xrange(1,texCoordCount):
-            f.read(8*vertexCount)
+        self._load_vn(f,frameCount,vertexCount)
+        if self.texture is not None:
+            self._load_t(f,texCoordCount,vertexCount)
         f.read(16)
         f.read(16*(colorCount-1))
         self._load_i(f,indexCount)   
@@ -238,7 +235,9 @@ class Mesh4(Mesh):
                 texture = g3d.assign_texture(f.text64())
                 if t == 0:
                     self.texture = texture
-        self._load_vnt(f,frameCount,vertexCount)
+        self._load_vn(f,frameCount,vertexCount)
+        if self.texture is not None:
+            self._load_t(f,1,vertexCount)
         self._load_i(f,indexCount)
     
 class G3D:
@@ -278,7 +277,7 @@ class G3D:
     def assign_texture(self,texture):
         texture = os.path.join(os.path.split(self.filename)[0],texture)
         return self.mgr.assign_texture(texture)
-    def draw(self,now):
+    def draw_gl(self,now):
         glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA)
         glPushMatrix()
         glInitNames(1)
@@ -289,7 +288,7 @@ class G3D:
                 if (self.mgr.selection is not None) and (self.mgr.selection != mesh):
                     continue
                 glPushName(self.mgr.assign_mesh(mesh))
-                mesh.draw(now)
+                mesh.draw_gl(now,self.mgr.selection == mesh)
                 glPopName()
         finally:
             glPopMatrix()
@@ -380,8 +379,11 @@ if __name__ == "__main__":
                     self._animating = False
                 def init(self):
                     GLZPR.init(self)
-                    glDepthFunc(GL_LEQUAL)
                     glEnable(GL_TEXTURE_2D)
+                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+                    glFrontFace(GL_CCW)
+                    glEnable(GL_NORMALIZE)
+                    glEnable(GL_BLEND)
                     self.mgr.load_textures()
                     gobject.timeout_add(1,self._animate)
                 def _animate(self):
@@ -396,7 +398,7 @@ if __name__ == "__main__":
                     glClearColor(1.,1.,.9,1.)
                     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
                     for model in self.mgr.models.values():
-                        model.draw(now)
+                        model.draw_gl(now)
                 def pick(self,event,nearest,hits):
                     if len(nearest) != 1:
                         self.mgr.selection = None 
