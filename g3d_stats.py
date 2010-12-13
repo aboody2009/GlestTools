@@ -184,7 +184,7 @@ class Mesh(object):
             glColor(0,1,0,1)
             immutable = False
         else:
-            glBindTexture(GL_TEXTURE_2D,self.texture)
+            bind_texture_gl(self.texture)
             glColor(1,1,1,1)
         glBegin(GL_TRIANGLES)
         for j,i in enumerate(self.indices):
@@ -303,6 +303,7 @@ class Manager:
         self.textures = {}
         self.models = {}
         self.selection = None
+        self.opaque_textures = set()
     def load_model(self,filename):
         filename = os.path.relpath(filename,self.base_folder)
         if filename not in self.models:
@@ -336,7 +337,14 @@ class Manager:
         return self.meshes[mesh]
     def resolve_mesh(self,v):
         return self.mesh_reverse[v]
-    def load_textures(self):
+    def bind_texture_gl(self,texture):
+        glBindTexture(GL_TEXTURE_2D,texture)
+        if self.opaque_textures.contains(texture):
+            glEnable(GL_CULL_FACE)
+            print "Culling",texture
+        else:
+            glDisable(GL_CULL_FACE)
+    def load_textures_gl(self):
         import Image
         for filename,texture in self.textures.iteritems():
             try:
@@ -348,6 +356,7 @@ class Manager:
                 except:
                     image = image.tostring("raw","RGB",0,-1)
                     mode = GL_RGB
+                    self.opaque_textures.add(texture)
                 glPixelStorei(GL_UNPACK_ALIGNMENT,1)
                 glBindTexture(GL_TEXTURE_2D,texture)
                 glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP)
@@ -392,7 +401,7 @@ if __name__ == "__main__":
                     glFrontFace(GL_CCW)
                     glEnable(GL_NORMALIZE)
                     glEnable(GL_BLEND)
-                    self.load_textures()
+                    self.load_textures_gl()
                     gobject.timeout_add(1,self._animate)
                 def _animate(self):
                     if not self._animating:
