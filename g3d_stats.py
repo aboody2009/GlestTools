@@ -154,7 +154,7 @@ class Mesh(object):
         self.out_matrices = len(self.vertices)-1-count_mutable
         self.out_indices = self.in_indices
     def interop(self,now):
-        i = (now*5)%len(self.vertices)
+        i = (now*self.g3d.mgr.render_speed)%len(self.vertices)
         p = int(i)
         n = (p+1)%len(self.vertices)
         f = i%1.
@@ -170,14 +170,15 @@ class Mesh(object):
         vertices = inter(self.vertices[p],self.vertices[n])
         normals = inter(self.normals[p],self.normals[n])
         if self.txCoords is not None:
-            i = int((now*5)%len(self.txCoords))
+            i = int((now*self.g3d.mgr.render_speed)%len(self.txCoords))
             textures = self.txCoords[i]
         else:
             textures = None
         return (vertices,normals,self.analysis[p],textures)
-    def draw_gl(self,now,analyse):
+    def draw_gl(self,now):
         vertices, normals, analysis, textures = self.interop(now)
-        if not analyse: analysis = None
+        if not self.g3d.mgr.render_analysis: analysis = None
+        if not self.g3d.mgr.render_normals: normals = None
         if (analysis is not None) or (textures is None):
             glBindTexture(GL_TEXTURE_2D,0)
             glColor(0,1,0,1)
@@ -196,7 +197,8 @@ class Mesh(object):
                         glBegin(GL_TRIANGLES)
                 elif textures is not None:
                     glTexCoord(*textures[k])
-                glNormal(*normals[k])
+                if normals is not None:
+                    glNormal(*normals[k])
                 glVertex(*vertices[k])
         glEnd()
         
@@ -288,7 +290,7 @@ class G3D:
                 if (self.mgr.selection is not None) and (self.mgr.selection != mesh):
                     continue
                 glPushName(self.mgr.assign_mesh(mesh))
-                mesh.draw_gl(now,self.mgr.selection == mesh)
+                mesh.draw_gl(now)
                 glPopName()
         finally:
             glPopMatrix()
@@ -371,20 +373,26 @@ if __name__ == "__main__":
             from zpr import GLZPR
             glutInit(())
         
-            class Scene(GLZPR):
+            class Scene(GLZPR,Manager):
                 def __init__(self):
                     GLZPR.__init__(self)
-                    self.mgr = Manager()
+                    Manager.__init__(self)
                     self.start = time.time()
                     self._animating = False
+                    self.render_speed = 10
+                    self.render_normals = True
+                    self.render_analysis = True
+                    self.cull_faces = True
                 def init(self):
                     GLZPR.init(self)
                     glEnable(GL_TEXTURE_2D)
-                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+                    glEnable(GL_ALPHA_TEST)
+                    glAlphaFunc(GL_GREATER,.4)
+                    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA)
                     glFrontFace(GL_CCW)
                     glEnable(GL_NORMALIZE)
                     glEnable(GL_BLEND)
-                    self.mgr.load_textures()
+                    self.load_textures()
                     gobject.timeout_add(1,self._animate)
                 def _animate(self):
                     if not self._animating:
@@ -395,19 +403,41 @@ if __name__ == "__main__":
                         gobject.timeout_add(1,self._animate)
                         self._animating = False
                     now = time.time() - self.start
+                    if self.cull_faces:
+                        glEnable(GL_CULL_FACE)
+                    else:
+                        glDisable(GL_CULL_FACE)
                     glClearColor(1.,1.,.9,1.)
                     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
-                    for model in self.mgr.models.values():
-                        model.draw_gl(now)
+                    for model in self.models.values():
+                        model.draw_gl(now)                        
+                def keyPress(self,event):
+                    key = chr(event.keyval)
+                    if key in ('n','N'):
+                        self.render_normals = not self.render_normals
+                        print "normals","ON" if self.render_normals else "OFF"
+                    elif key in ('a','A'):
+                        self.render_analysis = not self.render_analysis
+                        print "analysis","ON" if self.render_analysis else "OFF"
+                    elif key in ('c','C'):
+                        self.cull_faces = not self.cull_faces
+                        print "cull-faces","ON" if self.cull_faces else "OFF" 
+                    elif key in ('h','H'):
+                        print "Help:"
+                        print "\ta\tshow analysis"
+                        print "\tn\ttoggle rendering of normals"
+                        print "\tc\tglEnable(GL_CULL_FACE)"
+                    else:
+                        print "unknown key",key,"- type H for help"
                 def pick(self,event,nearest,hits):
                     if len(nearest) != 1:
-                        self.mgr.selection = None 
+                        self.selection = None 
                         return
-                    self.mgr.selection = self.mgr.resolve_mesh(nearest[0])
+                    self.selection = self.resolve_mesh(nearest[0])
                         
             scene = Scene()
-            scene.mgr.load_model(sys.argv[1])
-            scene.mgr.analyse()
+            scene.load_model(sys.argv[1])
+            scene.analyse()
         
             gtk.gdk.threads_init()
             window = gtk.Window(gtk.WINDOW_TOPLEVEL)

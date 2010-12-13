@@ -33,9 +33,13 @@ class GLZPR(gtkgl.DrawingArea):
         self.connect("button_release_event",self._mouseButton)
         self.connect("motion_notify_event",self._mouseMotion)
         self.connect("scroll_event",self._mouseScroll)
+        self.connect("key_press_event",self._keyPress)
         self.set_events(self.get_events()|
             gdk.BUTTON_PRESS_MASK|gdk.BUTTON_RELEASE_MASK|
-            gdk.POINTER_MOTION_MASK|gdk.POINTER_MOTION_HINT_MASK)
+            gdk.POINTER_MOTION_MASK|gdk.POINTER_MOTION_HINT_MASK|
+            gdk.KEY_PRESS_MASK)
+        self.set_flags(gtk.HAS_FOCUS|gtk.CAN_FOCUS)
+        self.grab_focus()
         self._zNear, self._zFar = -10.0, 10.0
         self._zprReferencePoint = [0.,0.,0.,0.]
         self._mouseX = self._mouseY = 0
@@ -189,6 +193,11 @@ class GLZPR(gtkgl.DrawingArea):
         with self.open_context(True):
             self._apply(glScalef,s,s,s)
             self.queue_draw()
+            
+    def _keyPress(self,widget,event):
+        assert(self == widget)
+        if hasattr(self,"keyPress"):
+            self.keyPress(event)
         
     @classmethod
     def event_masked(cls,event,mask):
