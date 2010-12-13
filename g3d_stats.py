@@ -3,6 +3,12 @@
 import struct, os, sys, time, numpy, math
 from numpy import float_ as precision
 
+def fmt_bytes(b):
+    for m in ["B","KB","MB","GB"]:
+        if b < 1024:
+            return "%1.1f %s"%(b,m)
+        b /= 1024.
+
 class BinaryStream:
     def __init__(self,filename):
         self.filename = filename
@@ -59,6 +65,11 @@ class Mesh(object):
         self.txCoords = None
         self.texture = None
         self.bounds = []
+        self.in_vertices = 0
+        self.in_indices = 0
+        self.out_vertices = 0
+        self.out_indices = 0
+        self.out_matrices = 0
     def _load_vnt(self,f,frameCount,vertexCount):
         self.vertices = []
         for i in xrange(frameCount):
@@ -82,18 +93,29 @@ class Mesh(object):
             for v in xrange(vertexCount):
                 pt = (f.float32(),f.float32())
                 self.txCoords[v] = pt
+        self.in_vertices = (frameCount*vertexCount)
     def _load_i(self,f,indexCount):
-        self.indices = numpy.zeros(indexCount,dtype=numpy.uint32)
-        for i in xrange(indexCount):
-            self.indices[i] = f.uint32()
-    def analyse(self):
-        print self.__class__.__name__,len(self.vertices),len(self.vertices[0]),len(self.indices),
+        assert indexCount % 3 == 0, "incomplete triangles (%s)"%indexCount
+        self.indices = numpy.zeros((indexCount/3,3),dtype=numpy.uint32)
+        for i in xrange(indexCount/3):
+            self.indices[i] = (f.uint32(),f.uint32(),f.uint32())
+        self.in_indices = indexCount
+    def indentify_immutable(self,verbosity):
+        #self.analysis = [None for v in self.vertices]
+        #return
+        if verbosity > 1: print self.__class__.__name__,len(self.vertices),len(self.vertices[0]),len(self.indices),
         # are all vertices used?
-        used = numpy.zeros(len(self.vertices[0]),dtype=numpy.bool_)
+        self.out_vertices = len(self.vertices[0])
+        used = numpy.zeros(self.out_vertices,dtype=numpy.bool_)
         for i in self.indices:
-            used[i] = True
+            used[i] = True # fun assignment from iterator
         if not all(used):
-            print "Unused vertices:",used
+            u = []
+            for i,j in enumerate(used):
+                if not j:
+                    u.append(str(i))
+                    self.out_vertices -= 1
+            print "Unused vertices:",",".join(u)
             print "*** this is most unusual; tell Will! ***"
         del used
         # group all vertices in each frame
@@ -103,29 +125,33 @@ class Mesh(object):
                 (a[1]-b[1])**2 +
                 (a[2]-b[2])**2)
         def feq(a,b):
-            if precision == numpy.double:
-                return abs(a-b) < 0.00000001
-            return abs(a-b) < 0.000001
+            return abs(a-b) < 0.000002
         self.analysis = [None]
-        i = self.indices
         immutable = True
+        count_mutable = 0
+        # for each frame
         for f in xrange(1,len(self.vertices)):
             p, n = self.vertices[f-1], self.vertices[f]
-            analysis = numpy.zeros(len(i),dtype=numpy.bool_)
+            analysis = numpy.zeros(len(self.indices),dtype=numpy.bool_)
             mutable = False
             # for each triangle
-            for t in xrange(0,len(i),3):
-                for v in xrange(3):
-                    if feq(dist(n[i[t]],n[i[t+1]]),dist(p[i[t]],p[i[t+1]])) and \
-                        feq(dist(n[i[t+1]],n[i[t+2]]),dist(p[i[t+1]],p[i[t+2]])) and \
-                        feq(dist(n[i[t+2]],n[i[t]]),dist(p[i[t+2]],p[i[t]])):
-                        continue
-                    analysis[t:t+3] = (True,True,True)
-                    immutable = False
-                    mutable = True
+            for i,v in enumerate(self.indices):
+                if feq(dist(n[v[0]],n[v[1]]),dist(p[v[0]],p[v[1]])) and \
+                    feq(dist(n[v[1]],n[v[2]]),dist(p[v[1]],p[v[2]])) and \
+                    feq(dist(n[v[2]],n[v[0]]),dist(p[v[2]],p[v[0]])):
+                    continue
+                analysis[i] = True
+                immutable = False
+                mutable = True
             self.analysis.append(analysis if mutable else None)
-            print "x" if mutable else "y",
-        print "IMMUTABLE" if immutable else "mutable"
+            if verbosity > 2: print "x" if mutable else "y",
+            if mutable:
+                count_mutable += 1
+        if verbosity > 1: print ("IMMUTABLE" if len(self.vertices)>1 else "immutable") if immutable else "mutable"
+        if count_mutable > 0:
+            self.out_vertices *= count_mutable
+            self.out_matrices = len(self.vertices)-1-count_mutable
+        self.out_indices = self.in_indices
     def interop(self,now):
         i = (now*5)%len(self.vertices)
         p = int(i)
@@ -155,22 +181,30 @@ class Mesh(object):
             glColor(1,1,1,1)
         glBegin(GL_TRIANGLES)
         for j,i in enumerate(self.indices):
-            if analysis is not None:
-                if analysis[j] != immutable:
-                    assert j % 3 == 0
-                    immutable = not immutable
-                    glEnd()
-                    glColor(1 if immutable else 0,0 if immutable else 1,0,1)
-                    glBegin(GL_TRIANGLES)
-            elif textures is not None:
-                glTexCoord(*textures[i])
-            glNormal(*normals[i])
-            glVertex(*vertices[i])
+            for k in i:
+                if analysis is not None:
+                    if analysis[j] != immutable:
+                        immutable = not immutable
+                        glEnd()
+                        glColor(1 if immutable else 0,0 if immutable else 1,0,1)
+                        glBegin(GL_TRIANGLES)
+                elif textures is not None:
+                    glTexCoord(*textures[k])
+                glNormal(*normals[k])
+                glVertex(*vertices[k])
         glEnd()
         
 class Mesh3(Mesh):
     def __init__(self,g3d,f):
         Mesh.__init__(self,g3d)
+# uint32 vertexFrameCount;
+# uint32 normalFrameCount;
+# uint32 texCoordFrameCount;
+# uint32 colorFrameCount;
+# uint32 pointCount;
+# uint32 indexCount;
+# uint32 properties;
+# uint8 texName[64];
         frameCount = f.uint32()
         normalCount = f.uint32()
         texCoordCount = f.uint32()
@@ -178,10 +212,13 @@ class Mesh3(Mesh):
         vertexCount = f.uint32()
         indexCount = f.uint32()
         properties = f.uint32()
+        print frameCount,normalCount,texCoordCount,colorCount,vertexCount,indexCount,properties
         texture = f.text64()
         if 0 == (properties & 1):
             self.texture = g3d.assign_texture(texture)
         self._load_vnt(f,frameCount,vertexCount)
+        for i in xrange(1,texCoordCount):
+            f.read(8*vertexCount)
         f.read(16)
         f.read(16*(colorCount-1))
         self._load_i(f,indexCount)   
@@ -196,8 +233,11 @@ class Mesh4(Mesh):
         f.read(8*4)
         self.properties = properties = f.uint32()
         self.textures = textures = f.uint32()
-        if (textures & 1) == 1:
-            self.texture = g3d.assign_texture(f.text64())
+        for t in xrange(5):
+            if ((1 << t) & textures) != 0:
+                texture = g3d.assign_texture(f.text64())
+                if t == 0:
+                    self.texture = texture
         self._load_vnt(f,frameCount,vertexCount)
         self._load_i(f,indexCount)
     
@@ -211,6 +251,7 @@ class G3D:
         if f.read(3) != "G3D":
             raise Exception("%s is not a G3D file"%filename)
         self.ver = f.uint8()
+        print self.ver, 
         if self.ver == 3:
             meshCount = f.uint32()
             for mesh in xrange(meshCount):
@@ -230,14 +271,15 @@ class G3D:
         x,y,z = bounds.centre()
         s = 1.8/max(*bounds.size())
         self.scaling = (x,y,z,s)
-    def analyse(self):
-        print "Analysing G3D",self.filename
+    def analyse(self,verbosity):
+        if verbosity > 0: print "Analysing G3D",self.filename
         for mesh in self.meshes:
-            mesh.analyse();
+            mesh.indentify_immutable(verbosity);
     def assign_texture(self,texture):
         texture = os.path.join(os.path.split(self.filename)[0],texture)
         return self.mgr.assign_texture(texture)
     def draw(self,now):
+        glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA)
         glPushMatrix()
         glInitNames(1)
         try:
@@ -253,11 +295,32 @@ class G3D:
             glPopMatrix()
         
 class Manager:
-    def __init__(self):
+    def __init__(self,base_folder=os.getcwd()):
+        self.base_folder = base_folder
         self.meshes = {}
         self.mesh_reverse = {}
         self.textures = {}
+        self.models = {}
         self.selection = None
+    def load_model(self,filename):
+        filename = os.path.relpath(filename,self.base_folder)
+        if filename not in self.models:
+            self.models[filename] = G3D(self,filename)
+    def analyse(self,verbosity=sys.maxint):
+        for model in self.models.values():
+            model.analyse(verbosity)
+        print "=== Input ==="
+        print len(self.models),"models"
+        vertices = sum(sum(mesh.in_vertices for mesh in model.meshes) for model in self.models.values())
+        print vertices,"vertices in","(%s)"%fmt_bytes(vertices*4*3*2)
+        indices = sum(sum(mesh.in_indices for mesh in model.meshes) for model in self.models.values())
+        print indices,"indices in","(%s)"%fmt_bytes(indices*4)
+        vertices = sum(sum(mesh.out_vertices for mesh in model.meshes) for model in self.models.values())
+        print vertices,"vertices out","(%s)"%fmt_bytes(vertices*4*3*2)
+        indices = sum(sum(mesh.out_indices for mesh in model.meshes) for model in self.models.values())
+        print indices,"indices out","(%s)"%fmt_bytes(indices*4)
+        matrices = sum(sum(mesh.out_matrices for mesh in model.meshes) for model in self.models.values())
+        print matrices,"matrices out","(%s)"%fmt_bytes(matrices*4*4*4)
     def assign_texture(self,texture):
         if texture not in self.textures:
             v = len(self.textures)+1
@@ -278,14 +341,19 @@ class Manager:
             try:
                 image = Image.open(filename)
                 w, h = image.size
-                image = image.tostring("raw","RGB",0,-1)
+                try:
+                    image = image.tostring("raw","RGBA",0,-1)
+                    mode = GL_RGBA
+                except:
+                    image = image.tostring("raw","RGB",0,-1)
+                    mode = GL_RGB
                 glPixelStorei(GL_UNPACK_ALIGNMENT,1)
                 glBindTexture(GL_TEXTURE_2D,texture)
                 glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP)
                 glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP)
                 glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR)
                 glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR)
-                glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,w,h,0,GL_RGB,GL_UNSIGNED_BYTE,image)
+                glTexImage2D(GL_TEXTURE_2D,0,mode,w,h,0,mode,GL_UNSIGNED_BYTE,image)
             except Exception,e:
                 print "Could not load texture",filename,"->",texture
                 print e
@@ -294,7 +362,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit("Usage: python g3d_stats.py [model.g3d] {model2.g3d} ... {modelN.g3d}")
 
-    if len(sys.argv) == 2:        
+    if (len(sys.argv) == 2) and os.path.isfile(sys.argv[1]):        
         try:
             import pygtk; pygtk.require('2.0')
             import gtk, gtk.gdk as gdk, gtk.gtkgl as gtkgl, gtk.gdkgl as gdkgl, gobject
@@ -308,23 +376,18 @@ if __name__ == "__main__":
                 def __init__(self):
                     GLZPR.__init__(self)
                     self.mgr = Manager()
-                    self.models = []
                     self.start = time.time()
                     self._animating = False
                 def init(self):
                     GLZPR.init(self)
+                    glDepthFunc(GL_LEQUAL)
                     glEnable(GL_TEXTURE_2D)
                     self.mgr.load_textures()
                     gobject.timeout_add(1,self._animate)
-                def analyse(self):
-                    for model in self.models:
-                        model.analyse()
                 def _animate(self):
                     if not self._animating:
                         self.queue_draw()
                         self._animating = True
-                def add(self,filename):
-                    self.models.append(G3D(self.mgr,filename))
                 def draw(self,event):
                     if self._animating:
                         gobject.timeout_add(1,self._animate)
@@ -332,7 +395,7 @@ if __name__ == "__main__":
                     now = time.time() - self.start
                     glClearColor(1.,1.,.9,1.)
                     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
-                    for model in self.models:
+                    for model in self.mgr.models.values():
                         model.draw(now)
                 def pick(self,event,nearest,hits):
                     if len(nearest) != 1:
@@ -341,8 +404,8 @@ if __name__ == "__main__":
                     self.mgr.selection = self.mgr.resolve_mesh(nearest[0])
                         
             scene = Scene()
-            scene.add(sys.argv[1])
-            scene.analyse()
+            scene.mgr.load_model(sys.argv[1])
+            scene.mgr.analyse()
         
             gtk.gdk.threads_init()
             window = gtk.Window(gtk.WINDOW_TOPLEVEL)
@@ -359,10 +422,18 @@ if __name__ == "__main__":
             import traceback; traceback.print_exc()
             print "Could not display 3D using OpenGL and GTK with ZPR"
            
-    print sys.argv
     mgr = Manager()
-    models = []
+    models = {}
     for filename in sys.argv[1:]:
-        models.append(G3D(mgr,filename))
-    for model in models:
-        model.analyse()
+        filename = os.path.abspath(filename)
+        if os.path.isfile(filename):
+            mgr.load_model(filename)
+        else:
+            for f in os.walk(filename):
+                path = f[0] 
+                for f in f[2]:
+                    if os.path.splitext(f)[1] == ".g3d":
+                        filename = os.path.join(path,f)
+                        mgr.load_model(filename)
+    mgr.analyse()
+

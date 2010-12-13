@@ -293,6 +293,7 @@ class GLZPR(gtkgl.DrawingArea):
             import traceback
             traceback.print_exc()
             gtk.main_quit()
+            return False
         return True
 
 def _demo_draw(event):
