@@ -101,32 +101,53 @@ class Mesh(object):
         for i in xrange(indexCount/3):
             self.indices[i] = (f.uint32(),f.uint32(),f.uint32())
         self.in_indices = indexCount
-    def indentify_immutable(self,verbosity):
+    def identify_immutable(self,verbosity):
+        def dist(a,b):
+            sqrd = (a[0]-b[0])**2 + \
+                (a[1]-b[1])**2 + \
+                (a[2]-b[2])**2
+            if sqrd > 0:
+                return math.sqrt(sqrd)
+            return 0
+        def feq(a,b):
+            return abs(a-b) < 0.000001
+        def triangle_eq(a,b,c,d):
+            for i in xrange(3):
+                if not feq(dist(a[i],b[i]),dist(c[i],d[i])):
+                    return False
+            return True
         #self.analysis = [None for v in self.vertices]
         #return
-        if verbosity > 1: print self.__class__.__name__,len(self.vertices),len(self.vertices[0]),len(self.indices),
-        # are all vertices used?
-        self.out_vertices = len(self.vertices[0])
-        used = numpy.zeros(self.out_vertices,dtype=numpy.bool_)
-        for i in self.indices:
-            used[i] = True # fun assignment from iterator
-        if not all(used):
-            u = []
-            for i,j in enumerate(used):
-                if not j:
-                    u.append(str(i))
-                    self.out_vertices -= 1
-            print "Unused vertices:",",".join(u)
-            print "*** this is most unusual; tell Will! ***"
-        del used
+        if verbosity > 1: print "Analyse",self.__class__.__name__,len(self.vertices),len(self.vertices[0]),len(self.indices),
+        num_groups = 0
+        v0 = self.vertices[0]
+        self.group = numpy.zeros(len(self.indices),dtype=numpy.int_)
+        for i,triangle1 in enumerate(self.indices):
+            if self.group[i] > 0:
+                continue
+            grouped = False
+            a = (v0[triangle1[0]],v0[triangle1[1]],v0[triangle1[2]])
+            for j in xrange(i+1,len(self.indices)):
+                if self.group[j] > 0:
+                    continue
+                triangle2 = self.indices[j]
+                b = (v0[triangle2[0]],v0[triangle2[1]],v0[triangle2[2]])
+                eq = True
+                for vn in self.vertices[1:]:
+                    c = (vn[triangle1[0]],vn[triangle1[1]],vn[triangle1[2]])
+                    d = (vn[triangle2[0]],vn[triangle2[1]],vn[triangle2[2]])
+                    if not triangle_eq(a,b,c,d):
+                        eq = False
+                        break
+                if not eq:
+                    continue
+                if not grouped:
+                    num_groups += 1
+                    self.group[i] = num_groups
+                    grouped = True
+                self.group[j] = num_groups
+        print num_groups,self.group
         # group all vertices in each frame
-        def dist(a,b):
-            return math.sqrt(
-                (a[0]-b[0])**2 +
-                (a[1]-b[1])**2 +
-                (a[2]-b[2])**2)
-        def feq(a,b):
-            return abs(a-b) < 0.000002
         self.analysis = [None]
         immutable = True
         count_mutable = 0
@@ -218,6 +239,8 @@ class Mesh3(Mesh):
         self._load_vn(f,frameCount,vertexCount)
         if self.texture is not None:
             self._load_t(f,texCoordCount,vertexCount)
+        if texCoordCount > 1:
+            print "***",g3d.filename,texCoordCount,"texture frames! ***"
         f.read(16)
         f.read(16*(colorCount-1))
         self._load_i(f,indexCount)   
@@ -275,7 +298,7 @@ class G3D:
     def analyse(self,verbosity):
         if verbosity > 0: print "Analysing G3D",self.filename
         for mesh in self.meshes:
-            mesh.indentify_immutable(verbosity);
+            mesh.identify_immutable(verbosity)
     def assign_texture(self,texture):
         texture = os.path.join(os.path.split(self.filename)[0],texture)
         return self.mgr.assign_texture(texture)
