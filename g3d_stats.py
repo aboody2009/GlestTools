@@ -102,6 +102,8 @@ class Mesh(object):
             self.indices[i] = (f.uint32(),f.uint32(),f.uint32())
         self.in_indices = indexCount
     def identify_immutable(self,verbosity):
+        self.analysis = [None for v in self.vertices]
+        #return
         def dist(a,b):
             sqrd = (a[0]-b[0])**2 + \
                 (a[1]-b[1])**2 + \
@@ -116,10 +118,9 @@ class Mesh(object):
                 if not feq(dist(a[i],b[i]),dist(c[i],d[i])):
                     return False
             return True
-        #self.analysis = [None for v in self.vertices]
-        #return
         if verbosity > 1: print "Analyse",self.__class__.__name__,len(self.vertices),len(self.vertices[0]),len(self.indices),
         num_groups = 0
+        ungrouped = 0
         v0 = self.vertices[0]
         self.group = numpy.zeros(len(self.indices),dtype=numpy.int_)
         for i,triangle1 in enumerate(self.indices):
@@ -146,33 +147,11 @@ class Mesh(object):
                     self.group[i] = num_groups
                     grouped = True
                 self.group[j] = num_groups
-        print num_groups,self.group
-        # group all vertices in each frame
-        self.analysis = [None]
-        immutable = True
-        count_mutable = 0
-        # for each frame
-        for f in xrange(1,len(self.vertices)):
-            p, n = self.vertices[f-1], self.vertices[f]
-            analysis = numpy.zeros(len(self.indices),dtype=numpy.bool_)
-            mutable = False
-            # for each triangle
-            for i,v in enumerate(self.indices):
-                if feq(dist(n[v[0]],n[v[1]]),dist(p[v[0]],p[v[1]])) and \
-                    feq(dist(n[v[1]],n[v[2]]),dist(p[v[1]],p[v[2]])) and \
-                    feq(dist(n[v[2]],n[v[0]]),dist(p[v[2]],p[v[0]])):
-                    continue
-                analysis[i] = True
-                immutable = False
-                mutable = True
-            self.analysis.append(analysis if mutable else None)
-            if verbosity > 2: print "x" if mutable else "y",
-            if mutable:
-                count_mutable += 1
-        if verbosity > 1: print ("IMMUTABLE" if len(self.vertices)>1 else "immutable") if immutable else "mutable"
-        if count_mutable > 0:
-            self.out_vertices *= count_mutable
-        self.out_matrices = len(self.vertices)-1-count_mutable
+            ungrouped += 1 if not grouped else 0
+        print "%s groups%s"%(num_groups,", %s ungrouped"%ungrouped if (ungrouped>0) else ""),
+        print "immutable" if len(self.vertices)==1 else "mutable" if ungrouped else "IMMUTABLE"
+        self.out_vertices = len(self.vertices[0]) + (ungrouped * (len(self.vertices)-1))
+        self.out_matrices = (len(self.vertices)-1) * num_groups
         self.out_indices = self.in_indices
     def interop(self,now):
         i = (now*self.g3d.mgr.render_speed)%len(self.vertices)
