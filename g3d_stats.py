@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import struct, os, sys, time, numpy, math
+import struct, os, sys, time, numpy, math, traceback
 from numpy import float_ as precision
 
 def fmt_bytes(b):
@@ -70,6 +70,7 @@ class Mesh(object):
         self.out_vertices = 0
         self.out_indices = 0
         self.out_matrices = 0
+        self.vbos = None
     def _load_vn(self,f,frameCount,vertexCount):
         self.vertices = []
         for i in xrange(frameCount):
@@ -176,6 +177,56 @@ class Mesh(object):
             textures = None
         return (vertices,normals,self.analysis[p],textures)
     def draw_gl(self,now):
+        if self.vbos is not None:
+            try:
+                self.draw_gl_vbos(now)
+            except Exception as e:
+                traceback.print_exc()
+                self.draw_gl_ffp(now)
+        else:
+            self.draw_gl_ffp(now)
+    def init_gl(self):
+        if not self.g3d.mgr.vbos:
+            return
+        def repack(array):
+            h,w = array.shape
+            new = numpy.zeros(w*h,dtype=array.dtype)
+            for i in xrange(h):
+                new[i] = array[i//w,i%w]
+            return new
+        try:
+            verts = [vbo.VBO(v,usage=GL_STATIC_DRAW) for v in self.vertices]
+            norms = [vbo.VBO(n,usage=GL_STATIC_DRAW) for n in self.normals]
+            # indices is actually a list of triangles, so unpack it
+            indices = vbo.VBO(repack(self.indices),usage=GL_STATIC_DRAW,target=GL_ELEMENT_ARRAY_BUFFER)
+            txCoords = vbo.VBO(self.txCoords,usage=GL_STATIC_DRAW)
+            self.vbos = (indices,verts,norms,txCoords)
+        except Exception as e:
+            traceback.print_exc()
+    def draw_gl_vbos(self,now):
+        glColor(1,1,1,1)
+        def bind(buf,typ,func):
+            buf.bind()
+            glEnableClientState(typ)
+            func(buf)
+        indices,verts,norms,txCoords = self.vbos
+        i = (now*self.g3d.mgr.render_speed)%len(verts)
+        p = int(i)
+        n = (p+1)%len(verts)
+        f = i%1.
+        bind(verts[p],GL_VERTEX_ARRAY,glVertexPointerf)
+        bind(norms[p],GL_NORMAL_ARRAY,glNormalPointerf)
+        if self.texture is not None:
+            glBindTexture(GL_TEXTURE_2D,self.texture)
+            glColor(0,1,0,1)
+            bind(txCoords,GL_TEXTURE_COORD_ARRAY,glTexCoordPointerf)
+        else:
+            glBindTexture(GL_TEXTURE_2D,self.texture)
+            glColor(1,1,1,1)
+        indices.bind()
+        glDrawElements(GL_TRIANGLES,len(indices),GL_UNSIGNED_INT,indices)
+        #glSecondaryColorPointer
+    def draw_gl_ffp(self,now):
         vertices, normals, analysis, textures = self.interop(now)
         if not self.g3d.mgr.render_analysis: analysis = None
         if not self.g3d.mgr.render_normals: normals = None
@@ -279,8 +330,13 @@ class G3D:
         for mesh in self.meshes:
             mesh.identify_immutable(verbosity)
     def assign_texture(self,texture):
+        while texture.startswith("\\") or texture.startswith("/"):
+            texture = texture[1:]
         texture = os.path.join(os.path.split(self.filename)[0],texture)
         return self.mgr.assign_texture(texture)
+    def init_gl(self):
+        for mesh in self.meshes:
+            mesh.init_gl()
     def draw_gl(self,now):
         glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA)
         glPushMatrix()
@@ -374,6 +430,7 @@ if __name__ == "__main__":
             from OpenGL.GL import *
             from OpenGL.GLU import *
             from OpenGL.GLUT import *
+            from OpenGL.arrays import vbo
             from zpr import GLZPR
             glutInit(())
         
@@ -387,6 +444,8 @@ if __name__ == "__main__":
                     self.render_normals = True
                     self.render_analysis = True
                     self.cull_faces = False
+                    self.shaders = False
+                    self.vbos = False
                 def init(self):
                     GLZPR.init(self)
                     glEnable(GL_TEXTURE_2D)
@@ -403,6 +462,25 @@ if __name__ == "__main__":
                     glEnable(GL_COLOR_MATERIAL)
                     self.load_textures_gl()
                     gobject.timeout_add(1,self._animate)
+                    if self.shaders:
+                        try:
+                            from OpenGL.GL import shaders
+                            vertex_shader = shaders.compileShader("""
+                                void main() {
+                                    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+                                }
+                                """,GL_VERTEX_SHADER)
+                            fragment_shader = shaders.compileShader("""
+                                void main() {
+                                    gl_FragColor = vec4( 0, 1, 0, 1 );
+                                }
+                                """,GL_FRAGMENT_SHADER)
+                            self.shader = shaders.compileProgram(vertex_shader,fragment_shader)
+                        except Exception as e:
+                            traceback.print_exc()
+                            self.shaders = False
+                    for model in self.models.values():
+                        model.init_gl()
                 def _animate(self):
                     if not self._animating:
                         self.queue_draw()
@@ -415,11 +493,16 @@ if __name__ == "__main__":
                     if self.cull_faces:
                         glEnable(GL_CULL_FACE)
                     else:
-                        glDisable(GL_CULL_FACE)
-                    glClearColor(1.,1.,.9,1.)
-                    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
-                    for model in self.models.values():
-                        model.draw_gl(now)                        
+                        glDisable(GL_CULL_FACE)                    
+                    try:
+                        if self.shaders:
+                            glUseProgram(self.shader)
+                        glClearColor(1.,1.,.9,1.)
+                        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
+                        for model in self.models.values():
+                            model.draw_gl(now)
+                    finally:
+                        glUseProgram(0)
                 def keyPress(self,event):
                     key = chr(event.keyval)
                     if key in ('n','N'):
