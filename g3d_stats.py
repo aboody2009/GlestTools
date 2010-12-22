@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+use_shaders = True
+use_vbros = True
+
 import struct, os, sys, time, numpy, math, traceback, ctypes
 
 def fmt_bytes(b):
@@ -458,8 +461,9 @@ if __name__ == "__main__":
                     self.render_normals = True
                     self.render_analysis = True
                     self.cull_faces = False
-                    self.shaders = False
-                    self.vbos = True
+                    global use_shaders, use_vbros
+                    self.shaders = use_shaders
+                    self.vbos = use_vbros
                     if self.vbos:
                         # picking crashes
                         self._pick = lambda *args: ([],[])
