@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
-import struct, os, sys, time, numpy, math, traceback
-from numpy import float_ as precision
+import struct, os, sys, time, numpy, math, traceback, ctypes
 
 def fmt_bytes(b):
     for m in ["B","KB","MB","GB"]:
@@ -58,6 +57,13 @@ class Bounds:
         y = -self.bounds[1]-(h/2.)
         z = -self.bounds[2]-(d/2.)
         return (x,y,z)
+
+def repack(array):
+    h,w = array.shape
+    new = numpy.zeros(w*h,dtype=array.dtype)
+    for i in xrange(w*h):
+        new[i] = array[i//w,i%w]
+    return new
         
 class Mesh(object):
     def __init__(self,g3d):
@@ -74,7 +80,7 @@ class Mesh(object):
     def _load_vn(self,f,frameCount,vertexCount):
         self.vertices = []
         for i in xrange(frameCount):
-            vertices = numpy.zeros((vertexCount,3),dtype=precision)
+            vertices = numpy.zeros((vertexCount,3),dtype=numpy.float32)
             bounds = Bounds()
             for v in xrange(vertexCount):
                 pt = (f.float32(),f.float32(),f.float32())
@@ -84,14 +90,14 @@ class Mesh(object):
             self.bounds.append(bounds)
         self.normals = []
         for i in xrange(frameCount):
-            normals = numpy.zeros((vertexCount,3),dtype=precision)
+            normals = numpy.zeros((vertexCount,3),dtype=numpy.float32)
             for n in xrange(vertexCount):
                 pt = (f.float32(),f.float32(),f.float32())
                 normals[n] = pt
             self.normals.append(normals)
         self.in_vertices = (frameCount*vertexCount)
     def _load_t(self,f,frameCount,vertexCount):
-        self.txCoords = numpy.zeros((frameCount,vertexCount,2),dtype=precision)
+        self.txCoords = numpy.zeros((frameCount,vertexCount,2),dtype=numpy.float32)
         for i in xrange(frameCount):
             for v in xrange(vertexCount):
                 pt = (f.float32(),f.float32())
@@ -160,7 +166,7 @@ class Mesh(object):
         n = (p+1)%len(self.vertices)
         f = i%1.
         def inter(a,b):
-            ret = numpy.zeros((len(a),3),dtype=precision)
+            ret = numpy.zeros((len(a),3),dtype=numpy.float32)
             for i in xrange(len(a)):
                 ax,ay,az = a[i]
                 bx,by,bz = b[i]
@@ -188,43 +194,42 @@ class Mesh(object):
     def init_gl(self):
         if not self.g3d.mgr.vbos:
             return
-        def repack(array):
-            h,w = array.shape
-            new = numpy.zeros(w*h,dtype=array.dtype)
-            for i in xrange(h):
-                new[i] = array[i//w,i%w]
-            return new
         try:
-            verts = [vbo.VBO(v,usage=GL_STATIC_DRAW) for v in self.vertices]
-            norms = [vbo.VBO(n,usage=GL_STATIC_DRAW) for n in self.normals]
+            vbo = self.g3d.mgr.make_vbo
+            verts = [vbo(v,GL_ARRAY_BUFFER) for v in self.vertices]
+            norms = [vbo(n,GL_ARRAY_BUFFER) for n in self.normals]
             # indices is actually a list of triangles, so unpack it
-            indices = vbo.VBO(repack(self.indices),usage=GL_STATIC_DRAW,target=GL_ELEMENT_ARRAY_BUFFER)
-            txCoords = vbo.VBO(self.txCoords,usage=GL_STATIC_DRAW)
+            indices = repack(self.indices)
+            self.num_indices = len(indices)
+            assert self.num_indices == len(self.indices)*3 
+            indices = vbo(indices,GL_ELEMENT_ARRAY_BUFFER)
+            txCoords = vbo(self.txCoords,GL_ARRAY_BUFFER) if self.texture is not None else None
             self.vbos = (indices,verts,norms,txCoords)
         except Exception as e:
             traceback.print_exc()
     def draw_gl_vbos(self,now):
-        glColor(1,1,1,1)
-        def bind(buf,typ,func):
-            buf.bind()
-            glEnableClientState(typ)
-            func(buf)
         indices,verts,norms,txCoords = self.vbos
         i = (now*self.g3d.mgr.render_speed)%len(verts)
         p = int(i)
         n = (p+1)%len(verts)
         f = i%1.
-        bind(verts[p],GL_VERTEX_ARRAY,glVertexPointerf)
-        bind(norms[p],GL_NORMAL_ARRAY,glNormalPointerf)
-        if self.texture is not None:
-            glBindTexture(GL_TEXTURE_2D,self.texture)
+        if txCoords is None:
+            glBindTexture(GL_TEXTURE_2D,0)
             glColor(0,1,0,1)
-            bind(txCoords,GL_TEXTURE_COORD_ARRAY,glTexCoordPointerf)
         else:
+            glEnableClientState(GL_TEXTURE_COORD_ARRAY)
+            glBindBuffer(GL_ARRAY_BUFFER,txCoords)
+            glTexCoordPointer(2,GL_FLOAT,0,None)
             glBindTexture(GL_TEXTURE_2D,self.texture)
             glColor(1,1,1,1)
-        indices.bind()
-        glDrawElements(GL_TRIANGLES,len(indices),GL_UNSIGNED_INT,indices)
+        glBindBuffer(GL_ARRAY_BUFFER,verts[p])
+        glVertexPointer(3,GL_FLOAT,0,None)
+        glBindBuffer(GL_ARRAY_BUFFER,norms[p])
+        glNormalPointer(GL_FLOAT,0,None)
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,indices)
+        glDrawElements(GL_TRIANGLES,self.num_indices,GL_UNSIGNED_INT,None)
+        glBindBuffer(GL_ARRAY_BUFFER,0)
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0)
         #glSecondaryColorPointer
     def draw_gl_ffp(self,now):
         vertices, normals, analysis, textures = self.interop(now)
@@ -362,6 +367,7 @@ class Manager:
         self.models = {}
         self.selection = None
         self.opaque_textures = set()
+        self._seq = 0
     def load_model(self,filename):
         filename = os.path.relpath(filename,self.base_folder)
         if filename not in self.models:
@@ -383,10 +389,19 @@ class Manager:
         print matrices,"matrices out","(%s)"%fmt_bytes(matrices*4*4*4)
     def assign_texture(self,texture):
         if texture not in self.textures:
-            v = len(self.textures)+1
+            v = self.assign_object()
             self.textures[texture] = v
             print "Assigning texture",texture,"->",v
         return self.textures[texture]
+    def make_vbo(self,array,target):
+        obj = self.assign_object()
+        glBindBuffer(target,obj)
+        glBufferData(target,array,GL_STATIC_DRAW)
+        glBindBuffer(target,0)
+        return obj
+    def assign_object(self):
+        self._seq += 1
+        return self._seq
     def assign_mesh(self,mesh):
         if mesh not in self.meshes:
             v = len(self.meshes)+1
@@ -430,7 +445,6 @@ if __name__ == "__main__":
             from OpenGL.GL import *
             from OpenGL.GLU import *
             from OpenGL.GLUT import *
-            from OpenGL.arrays import vbo
             from zpr import GLZPR
             glutInit(())
         
@@ -445,11 +459,14 @@ if __name__ == "__main__":
                     self.render_analysis = True
                     self.cull_faces = False
                     self.shaders = False
-                    self.vbos = False
+                    self.vbos = True
+                    if self.vbos:
+                        # picking crashes
+                        self._pick = lambda *args: ([],[])
                 def init(self):
                     GLZPR.init(self)
                     glEnable(GL_TEXTURE_2D)
-                    glEnable(GL_ALPHA_TEST)
+                    #glEnable(GL_ALPHA_TEST)
                     glAlphaFunc(GL_GREATER,.4)
                     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA)
                     glFrontFace(GL_CCW)
@@ -481,6 +498,9 @@ if __name__ == "__main__":
                             self.shaders = False
                     for model in self.models.values():
                         model.init_gl()
+                    if self.vbos:
+                        glEnableClientState(GL_VERTEX_ARRAY)
+                        glEnableClientState(GL_NORMAL_ARRAY)
                 def _animate(self):
                     if not self._animating:
                         self.queue_draw()
