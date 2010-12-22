@@ -476,7 +476,7 @@ if __name__ == "__main__":
                 def init(self):
                     GLZPR.init(self)
                     glEnable(GL_TEXTURE_2D)
-                    #glEnable(GL_ALPHA_TEST)
+                    glEnable(GL_ALPHA_TEST)
                     glAlphaFunc(GL_GREATER,.4)
                     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA)
                     glFrontFace(GL_CCW)
