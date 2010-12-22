@@ -223,12 +223,18 @@ class Mesh(object):
             glEnableClientState(GL_TEXTURE_COORD_ARRAY)
             glBindBuffer(GL_ARRAY_BUFFER,txCoords)
             glTexCoordPointer(2,GL_FLOAT,0,None)
+            glActiveTexture(GL_TEXTURE0)
             glBindTexture(GL_TEXTURE_2D,self.texture)
             glColor(1,1,1,1)
+            if self.g3d.mgr.shaders:
+                glUniform1i(self.g3d.mgr.uniform_tex,0)
+        glUniform1f(self.g3d.mgr.uniform_lerp,f)
         glBindBuffer(GL_ARRAY_BUFFER,verts[p])
         glVertexPointer(3,GL_FLOAT,0,None)
         glBindBuffer(GL_ARRAY_BUFFER,norms[p])
         glNormalPointer(GL_FLOAT,0,None)
+        glBindBuffer(GL_ARRAY_BUFFER,verts[n])
+        glColorPointer(3,GL_FLOAT,0,None)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,indices)
         glDrawElements(GL_TRIANGLES,self.num_indices,GL_UNSIGNED_INT,None)
         glBindBuffer(GL_ARRAY_BUFFER,0)
@@ -487,16 +493,24 @@ if __name__ == "__main__":
                         try:
                             from OpenGL.GL import shaders
                             vertex_shader = shaders.compileShader("""
+                                uniform float lerp;
+                                varying vec2 texture_coordinate; 
                                 void main() {
-                                    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+                                    gl_Position = gl_ModelViewProjectionMatrix * mix(gl_Vertex,gl_Color,lerp);
+                                    texture_coordinate = vec2(gl_MultiTexCoord0); // pass to frag
                                 }
                                 """,GL_VERTEX_SHADER)
                             fragment_shader = shaders.compileShader("""
+                                // tedious, try and be like the FFP 
+                                varying vec2 texture_coordinate; 
+                                uniform sampler2D tex;
                                 void main() {
-                                    gl_FragColor = vec4( 0, 1, 0, 1 );
+                                    gl_FragColor = texture2D(tex,texture_coordinate);
                                 }
                                 """,GL_FRAGMENT_SHADER)
                             self.shader = shaders.compileProgram(vertex_shader,fragment_shader)
+                            self.uniform_lerp = glGetUniformLocation(self.shader,"lerp")
+                            self.uniform_tex = glGetUniformLocation(self.shader,"tex")
                         except Exception as e:
                             traceback.print_exc()
                             self.shaders = False
@@ -505,6 +519,7 @@ if __name__ == "__main__":
                     if self.vbos:
                         glEnableClientState(GL_VERTEX_ARRAY)
                         glEnableClientState(GL_NORMAL_ARRAY)
+                        glEnableClientState(GL_COLOR_ARRAY)
                 def _animate(self):
                     if not self._animating:
                         self.queue_draw()
