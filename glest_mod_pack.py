@@ -460,6 +460,12 @@ class Mod:
                     if has_texture:
                         texture = texture[:texture.find('\0')]
                         self.files.ref(File.TEXTURE,model.subpath(texture),model,f.tell()-64)
+                        try:
+                            bumpmap = texture[:-4]+"_normal"+texture[-4:]
+                            if os.path.isfile(model.subpath(bumpmap)):
+                                model.error("this tool does not support v3 normals bumpmaps: %s"%bumpmap)
+                        except:
+                            pass
                     f.read(12*vertexFrameCount*pointCount)
                     f.read(12*vertexFrameCount*pointCount)
                     if has_texture:

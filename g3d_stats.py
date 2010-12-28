@@ -280,11 +280,15 @@ class Mesh3(Mesh):
         texture = f.text64()
         if 0 == (properties & 1):
             self.texture = g3d.assign_texture(texture)
+            bumpmap = texture[:-4]+"_normal"+texture[-4:]
+            if os.path.isfile(bumpmap):
+                print "***v3 normals bumpmap:",bumpmap,"***"
+                self.bumpmap = g3d.assign_texture(bumpmap)
         self._load_vn(f,frameCount,vertexCount)
         if self.texture is not None:
             self._load_t(f,texCoordCount,vertexCount)
         if texCoordCount > 1:
-            print "***",g3d.filename,texCoordCount,"texture frames! ***"
+            print "***v3: ",g3d.filename,texCoordCount,"texture frames! ***"
         f.read(16)
         f.read(16*(colorCount-1))
         self._load_i(f,indexCount)   
@@ -304,6 +308,9 @@ class Mesh4(Mesh):
                 texture = g3d.assign_texture(f.text64())
                 if t == 0:
                     self.texture = texture
+                elif t == 2:
+                    print "*** v4 normals bumpmap:",texture,"***"
+                    self.bumpmap = g3d.assign_texture(texture)                   
         self._load_vn(f,frameCount,vertexCount)
         if self.texture is not None:
             self._load_t(f,1,vertexCount)
@@ -598,5 +605,5 @@ if __name__ == "__main__":
                     if os.path.splitext(f)[1] == ".g3d":
                         filename = os.path.join(path,f)
                         mgr.load_model(filename)
-    mgr.analyse()
+    #mgr.analyse()
 
