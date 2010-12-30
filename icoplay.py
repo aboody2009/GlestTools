@@ -10,7 +10,7 @@ from zpr import GLZPR
 
 glutInit(())
     
-def create(recursionLevel):
+def terrain_create_ico(recursionLevel):
     def num_points(recursionLevel):
         return 5 * pow(2,2*recursionLevel+3) + 2 
     # a point is xyz and dist from centre cached
@@ -50,7 +50,7 @@ def create(recursionLevel):
     # 5 adjacent faces 
     [faces.append(t) for t in ((4,9,5),(2,4,11),(6,2,10),(8,6,7),(9,8,1))]
     # refine triangles
-    for i in xrange(recursionLevel):
+    for i in xrange(recursionLevel+1):
         faces2 = []
         for tri in faces:
             # replace triangle by 4 triangles
@@ -62,32 +62,51 @@ def create(recursionLevel):
             faces2.append((tri[2],c,b))
             faces2.append((a,b,c))
         faces = faces2
-        # print i, point_len[0], len(midpoints), len(faces), "%0.2f"%(float(len(faces))/float(point_len[0]))
+        print i, point_len[0], len(midpoints), len(faces), "%0.2f"%(float(len(faces))/float(point_len[0]))
+    assert len(points) == point_len[0]
     # make adjacency map
-    
-    # do some random height changes
-    def adjust(i,height):
-        points[i,3] += height
-    rnd = random.random
-    for i in xrange(len(points)):
-        adjust(i,(rnd()-.5)*.05)
+    adjacency = numpy.empty((len(points),6),dtype=numpy.int32)
+    for i in adjacency: i[:] = (-1,-1,-1,-1,-1,-1)
+    def add_adjacency(a,b):
+        def add(a,b):
+            a = adjacency[a]
+            for i in xrange(6):
+                if a[i] in (b,-1):
+                    a[i] = b
+                    return
+            assert False
+        add(a,b)
+        add(b,a)
+    for a,b,c in faces:
+        add_adjacency(a,b)
+        add_adjacency(b,c)
+        add_adjacency(a,c)
+    for j,i in enumerate(adjacency): assert i[4] != -1, "%s,%s,%s"%(j,len(adjacency),i)
     # done
-    return faces, points
+    return faces, points, adjacency
     
-triangles, points = create(4)
+terrain = terrain_create_ico(3)
 
 def draw_ico(event):
-    random.seed(1)
+    faces, points, adjacency = terrain
     rnd = random.random
+    random.seed(1)
     glClearColor(1,1,1,1)
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
     glScale(.8,.8,.8)
-    for i,(a,b,c) in enumerate(triangles):
-        glColor(rnd(),rnd(),rnd(),1)
-        glBegin(GL_TRIANGLES)        
-        glVertex(points[a,0:3])
-        glVertex(points[b,0:3])
-        glVertex(points[c,0:3])
+    def plot(i):
+        if adjacency[i,5] == -1:
+            glColor(1,0,0,1)
+        elif adjacency[i,4] == -1:
+            assert False
+        else:
+            glColor(0,0,1,1) 
+        glVertex(points[i,0:3])
+    for a,b,c in faces:
+        glBegin(GL_TRIANGLES)
+        plot(a)
+        plot(b)
+        plot(c)
         glEnd()
 
 gtk.gdk.threads_init()
@@ -99,6 +118,8 @@ vbox = gtk.VBox(False, 0)
 window.add(vbox)
 zpr = GLZPR()
 zpr.draw = draw_ico
+zpr._pick = lambda *args: ([],[])
+zpr.pick = lambda *args: False
 vbox.pack_start(zpr,True,True)
 window.show_all()
 gtk.main()
