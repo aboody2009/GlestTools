@@ -13,14 +13,18 @@ glutInit(())
 def create(recursionLevel):
     def num_points(recursionLevel):
         return 5 * pow(2,2*recursionLevel+3) + 2 
-    points = numpy.zeros((num_points(recursionLevel),3),dtype=numpy.float32)
+    # a point is xyz and dist from centre cached
+    points = numpy.zeros((num_points(recursionLevel),4),dtype=numpy.float32)
     point_len = [0]
     midpoints = {}
     def add(point):
         slot = point_len[0]
         point_len[0] += 1
-        dist = math.sqrt(sum(p**2 for p in point))
-        points[slot] = [p/dist for p in point]
+        dist = 0
+        for i in xrange(3): dist += point[i]**2
+        dist = math.sqrt(dist)
+        for i in xrange(3): points[slot,i] = point[i]/dist
+        points[slot,3] = dist
         return slot
     def midpoint(a,b):
         key = (min(a,b) << 32) + max(a,b)
@@ -58,7 +62,16 @@ def create(recursionLevel):
             faces2.append((tri[2],c,b))
             faces2.append((a,b,c))
         faces = faces2
-        print i, point_len[0], len(midpoints), len(faces), "%0.2f"%(float(len(faces))/float(point_len[0]))
+        # print i, point_len[0], len(midpoints), len(faces), "%0.2f"%(float(len(faces))/float(point_len[0]))
+    # make adjacency map
+    
+    # do some random height changes
+    def adjust(i,height):
+        points[i,3] += height
+    rnd = random.random
+    for i in xrange(len(points)):
+        adjust(i,(rnd()-.5)*.05)
+    # done
     return faces, points
     
 triangles, points = create(4)
@@ -68,12 +81,13 @@ def draw_ico(event):
     rnd = random.random
     glClearColor(1,1,1,1)
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
+    glScale(.8,.8,.8)
     for i,(a,b,c) in enumerate(triangles):
         glColor(rnd(),rnd(),rnd(),1)
         glBegin(GL_TRIANGLES)        
-        glVertex(points[a])
-        glVertex(points[b])
-        glVertex(points[c])
+        glVertex(points[a,0:3])
+        glVertex(points[b,0:3])
+        glVertex(points[c,0:3])
         glEnd()
 
 gtk.gdk.threads_init()
