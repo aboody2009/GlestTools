@@ -21,7 +21,7 @@ class IcoMesh:
     
     def __init__(self,terrain,triangle,recursionLevel):
         self.terrain = terrain
-        self.triangle = triangle
+        self.boundary = triangle
         assert recursionLevel <= self.DIVIDE_THRESHOLD
         def num_points(recursionLevel):
             Nc = (15,45,153,561,2145,8385)
@@ -121,18 +121,29 @@ class IcoMesh:
             self.normal_vertices[i] = _vec_normalise(norm)
         rnd = random.random
         self.colour = (rnd(),rnd(),rnd(),1)
+        self.vertices = self._vbo(self.points,GL_ARRAY_BUFFER)
+        self.normals = self._vbo(self.normal_vertices,GL_ARRAY_BUFFER)
+        self.indices = self._vbo(self.faces,GL_ELEMENT_ARRAY_BUFFER)
+        self.num_indices = len(self.faces)
+                
+    def _vbo(array,target):
+        handle = glGenBuffers(1)
+        assert handle > 0
+        glBindBuffer(target,handle)
+        glBufferData(target,array,GL_STATIC_DRAW)
+        glBindBuffer(target,0)
+        return handle
         
     def draw_gl_ffp(self):
-        def plot(i):
-            glNormal(*self.normal_vertices[i])
-            glVertex(self.points[i,0:3])
-        glBegin(GL_TRIANGLES)
         glColor(*self.colour)
-        for i,(a,b,c) in enumerate(self.faces):
-            plot(a)
-            plot(b)
-            plot(c)
-        glEnd()
+        glBindBuffer(GL_ARRAY_BUFFER,self.vertices)
+        glVertexPointer(3,GL_FLOAT,0,None)
+        glBindBuffer(GL_ARRAY_BUFFER,self.normals)
+        glNormalPointer(GL_FLOAT,0,None)
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,self.indices)
+        glDrawElements(GL_TRIANGLES,self.num_indices,GL_UNSIGNED_INT,None)
+        glBindBuffer(GL_ARRAY_BUFFER,0)
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0)
 
 class Terrain:
     
@@ -177,14 +188,16 @@ class Terrain:
             mesh.init2()          
             
     def draw_gl_ffp(self,event):
+        glEnableClientState(GL_VERTEX_ARRAY)
+        glEnableClientState(GL_NORMAL_ARRAY)
         glClearColor(1,1,1,1)
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
         glScale(.8,.8,.8)
         modelview = numpy.matrix(glGetDoublev(GL_MODELVIEW_MATRIX))
         for mesh in self.meshes:
-            # cull those whose outline points away
+            # cull those whose outline points away; will need to account for high mountains visible on the horizon etc too of course
             cull = True
-            for pt in mesh.triangle:
+            for pt in mesh.boundary:
                 pt = (pt[0],pt[1],pt[2],0) * modelview
                 if pt[0,2] > 0:
                     cull = False
