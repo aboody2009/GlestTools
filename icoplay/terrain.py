@@ -20,6 +20,7 @@ class IcoMesh:
         self.terrain = terrain
         def num_points(recursionLevel):
             # return 5 * pow(2,2*recursionLevel+3) + 2
+            # 3 = 153
             return 153
         def add(point):
             slot = self.points_len
