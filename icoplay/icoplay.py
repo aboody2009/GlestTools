@@ -24,6 +24,10 @@ zpr = GLZPR()
 zpr.draw = terrain.draw_gl_ffp
 zpr._pick = lambda *args: ([],[])
 zpr.pick = lambda *args: False
+def zpr_init():
+    GLZPR.init(zpr)
+    terrain.init_gl()
+zpr.init = zpr_init
 vbox.pack_start(zpr,True,True)
 window.show_all()
 gtk.main()

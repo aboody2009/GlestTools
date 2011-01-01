@@ -26,7 +26,6 @@ class IcoMesh:
         def num_points(recursionLevel):
             Nc = (15,45,153,561,2145,8385)
             return Nc[recursionLevel-1]
-            return pow(2,2*recursionLevel+3)
         def add(point):
             slot = self.points_len
             self.points_len += 1
@@ -53,16 +52,19 @@ class IcoMesh:
         self.faces = ((0,1,2),)
         # refine triangles
         for i in xrange(recursionLevel+1):
-            faces = []
+            faces = numpy.empty((len(self.faces)*4,3),dtype=numpy.int32)
+            faces_len = 0
             for tri in self.faces:
                 # replace triangle by 4 triangles
                 a = midpoint(tri[0],tri[1])
                 b = midpoint(tri[1],tri[2])
                 c = midpoint(tri[2],tri[0])
-                faces.append((tri[0],a,c))
-                faces.append((tri[1],b,a))
-                faces.append((tri[2],c,b))
-                faces.append((a,b,c))
+                faces[faces_len+0] = (tri[0],a,c)
+                faces[faces_len+1] = (tri[1],b,a)
+                faces[faces_len+2] = (tri[2],c,b)
+                faces[faces_len+3] = (a,b,c)
+                faces_len += 4
+            assert faces_len == len(faces)
             self.faces = faces
         assert len(self.points) == self.points_len, "%s %s"%(len(self.points),self.points_len)
         del self.points_len
@@ -121,12 +123,16 @@ class IcoMesh:
             self.normal_vertices[i] = _vec_normalise(norm)
         rnd = random.random
         self.colour = (rnd(),rnd(),rnd(),1)
+        
+    def init_gl(self):
         self.vertices = self._vbo(self.points,GL_ARRAY_BUFFER)
         self.normals = self._vbo(self.normal_vertices,GL_ARRAY_BUFFER)
         self.indices = self._vbo(self.faces,GL_ELEMENT_ARRAY_BUFFER)
-        self.num_indices = len(self.faces)
+        colours = numpy.tile(numpy.array(self.colour,dtype=numpy.float32),len(self.points))
+        self.colours = self._vbo(colours,GL_ARRAY_BUFFER)
+        self.num_indices = len(self.faces)*3
                 
-    def _vbo(array,target):
+    def _vbo(self,array,target):
         handle = glGenBuffers(1)
         assert handle > 0
         glBindBuffer(target,handle)
@@ -135,11 +141,13 @@ class IcoMesh:
         return handle
         
     def draw_gl_ffp(self):
-        glColor(*self.colour)
         glBindBuffer(GL_ARRAY_BUFFER,self.vertices)
         glVertexPointer(3,GL_FLOAT,0,None)
+        glColor(*self.colour)
         glBindBuffer(GL_ARRAY_BUFFER,self.normals)
         glNormalPointer(GL_FLOAT,0,None)
+        glBindBuffer(GL_ARRAY_BUFFER,self.colours)
+        glColorPointer(4,GL_FLOAT,0,None)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,self.indices)
         glDrawElements(GL_TRIANGLES,self.num_indices,GL_UNSIGNED_INT,None)
         glBindBuffer(GL_ARRAY_BUFFER,0)
@@ -185,10 +193,15 @@ class Terrain:
         print "at",len(self.meshes[0].faces),"each."
 
         for mesh in self.meshes:
-            mesh.init2()          
+            mesh.init2()  
+            
+    def init_gl(self):
+        for mesh in self.meshes:
+            mesh.init_gl()
             
     def draw_gl_ffp(self,event):
         glEnableClientState(GL_VERTEX_ARRAY)
+        glEnableClientState(GL_COLOR_ARRAY)
         glEnableClientState(GL_NORMAL_ARRAY)
         glClearColor(1,1,1,1)
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
