@@ -16,12 +16,17 @@ def _vec_normalise(v):
     return v
 
 class IcoMesh:
+
+    DIVIDE_THRESHOLD = 4
+    
     def __init__(self,terrain,triangle,recursionLevel):
         self.terrain = terrain
+        self.triangle = triangle
+        assert recursionLevel <= self.DIVIDE_THRESHOLD
         def num_points(recursionLevel):
-            # return 5 * pow(2,2*recursionLevel+3) + 2
-            # 3 = 153
-            return 153
+            Nc = (15,45,153,561,2145,8385)
+            return Nc[recursionLevel-1]
+            return pow(2,2*recursionLevel+3)
         def add(point):
             slot = self.points_len
             self.points_len += 1
@@ -140,19 +145,49 @@ class Terrain:
                 (-1, t, 0),( 1, t, 0),(-1,-t, 0),( 1,-t, 0),
                 ( 0,-1, t),( 0, 1, t),( 0,-1,-t),( 0, 1,-t),
                 ( t, 0,-1),( t, 0, 1),(-t, 0,-1),(-t, 0, 1))
-        for a,b,c in ( \
+        for triangle in ( \
             (0,11,5),(0,5,1),(0,1,7),(0,7,10),(0,10,11),
             (1,5,9),(5,11,4),(11,10,2),(10,7,6),(7,1,8),
             (3,9,4),(3,4,2),(3,2,6),(3,6,8),(3,8,9),
             (4,9,5),(2,4,11),(6,2,10),(8,6,7),(9,8,1)):
-            self.meshes.append(IcoMesh(self,(p[a],p[b],p[c]),recursionLevel))
+            def divide(tri,depth):
+                assert all(n is not None for n in tri), tri
+                if (recursionLevel-depth) < IcoMesh.DIVIDE_THRESHOLD:
+                    self.meshes.append(IcoMesh(self,tri,recursionLevel-depth))
+                else:
+                    depth += 1
+                    def midpoint(a,b):
+                        return tuple((p1+p2)/2. for p1,p2 in zip(a,b))
+                    a = midpoint(tri[0],tri[1])
+                    b = midpoint(tri[1],tri[2])
+                    c = midpoint(tri[2],tri[0])
+                    divide((tri[0],a,c),depth) 
+                    divide((tri[1],b,a),depth)
+                    divide((tri[2],c,b),depth)
+                    divide((a,b,c),depth)
+            divide((p[triangle[0]],p[triangle[1]],p[triangle[2]]),0)
             
+        print len(self.meshes),"meshes,",
+        print sum(len(mesh.points) for mesh in self.meshes),"points",
+        print "at",len(self.meshes[0].points),"each;",
+        print sum(len(mesh.faces) for mesh in self.meshes),"faces",
+        print "at",len(self.meshes[0].faces),"each."
+
         for mesh in self.meshes:
-            mesh.init2()
+            mesh.init2()          
             
     def draw_gl_ffp(self,event):
         glClearColor(1,1,1,1)
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
         glScale(.8,.8,.8)
+        modelview = numpy.matrix(glGetDoublev(GL_MODELVIEW_MATRIX))
         for mesh in self.meshes:
+            # cull those whose outline points away
+            cull = True
+            for pt in mesh.triangle:
+                pt = (pt[0],pt[1],pt[2],0) * modelview
+                if pt[0,2] > 0:
+                    cull = False
+                    break
+            if cull: continue
             mesh.draw_gl_ffp()
