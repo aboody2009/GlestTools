@@ -3,7 +3,7 @@
 print "Creating terrain..."
 from terrain import Terrain
 terrain = Terrain()
-terrain.create_ico(3)
+terrain.create_ico(4)
 print "ok"
 
 import pygtk; pygtk.require('2.0')
