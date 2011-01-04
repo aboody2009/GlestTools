@@ -52,7 +52,6 @@ class File:
     """a file (type and path)"""
     MAP = "map"
     SCENARIO = "scenario"
-    FRACTION = "faction"
     TILESET = "tileset"
     TEXTURE = "texture"
     TECH_TREE = "tech-tree"
@@ -64,6 +63,7 @@ class File:
     UPGRADE = "upgrade"
     RESOURCE = "resource"
     LANGUAGE = "language"
+    PREVIEW = "preview"
     def __init__(self,mod,typ,path):
         self.mod = mod
         self.typ = typ           
@@ -88,6 +88,7 @@ class File:
             except Exception,e:
                 self.error(("Error reading xml",str(e)))
                 raise
+        self.dup = None
     def error(self,*args):
         self.broken = True
         broken = self.mod.broken
@@ -194,6 +195,13 @@ class FilterExt:
     def __call__(self,f):
         ext = os.path.splitext(f)[1].lower()
         return ext in self.ext
+        
+class FilterPrefix:
+    def __init__(self,*prefix):
+        self.prefix = [p.lower() for p in prefix]
+    def __call__(self,f):
+        f = f.lower()
+        return any(f.startswith(p) for p in self.prefix)
         
 def parse_mod_name(name):
     modname = []
@@ -319,6 +327,8 @@ class Mod:
             self._init_unit(unit)
         for upgrade in self._listdir(os.path.join(f,"upgrades"),os.path.isdir):
             self._init_upgrade(upgrade)
+        for preview in self._listdir(f,os.path.isfile,FilterPrefix("preview_screen.","loading_screen.")):
+            self.files.add(File.PREVIEW,preview)
     def _init_xml(self,f):
         if hasattr(f,"inited") and f.inited:
             return
@@ -539,6 +549,40 @@ class Mod:
                             candidate.dup = f
                             dups.add(candidate)
                 del f._bytes
+        # but ensure dups are deep copies
+        realdups = set()
+        for d in dups:
+            false = False
+            matches = {}
+            for ref1 in d.references:
+                if ref1.dup is None:
+                    false = True
+                    break
+                name1 = os.path.split(ref1.path)[1]
+                found = False
+                for ref2 in d.dup.references:
+                    name2 = os.path.split(ref2.path)[1]
+                    if name1==name2:
+                        found = True
+                        false = (ref1.dup!=ref2) and (ref2.dup!=ref1) and (ref2.dup!=ref1.dup)
+                        if not false:
+                            matches[ref1] = ref2 
+                if not found:
+                    print "ERROR: cannot find",name1,"in",d.dup
+                    sys.exit(1)
+                if false:
+                    break
+            if false:
+                print d.modpath,"is not a deep dup of",d.dup.modpath
+            else:
+                realdups.add(d)
+                if d.modpath.endswith(".g3d"):
+                    print "*#*#*#* Surprising dup info:"
+                    print d,d.dup
+                    for k,v in matches.iteritems():
+                        print k.modpath,k.dup,"->",v.modpath,v.dup
+        dups = realdups
+        del realdups
         errors = set()
         for d in dups:
             error = False
@@ -666,6 +710,9 @@ def main(argv):
         print "=== Ignored:",len(mod.files.ignored),fmt_bytes(ignored),"==="
     time_stop = time.time()
     print "=== (Analysis took %0.1f seconds) =="%(time_stop-time_start)
+    if include_count == 0:
+        print "Nothing to pack!"
+        sys.exit(1)
     print "=== Included:",include_count,fmt_bytes(included),"==="
     sum_type(mod,File.MODEL)
     sum_type(mod,File.TEXTURE)
@@ -675,6 +722,7 @@ def main(argv):
     sum_type(mod,File.UPGRADE)
     sum_type(mod,File.RESOURCE)
     sum_type(mod,File.LANGUAGE)
+    sum_type(mod,File.PREVIEW)
     if len(mod.factions) > 0:
         print "=== Fractions:",", ".join(mod.factions),"==="
     if len(mod.maps) > 0:
