@@ -1,6 +1,7 @@
 
 import numpy, math, random, sys
 from OpenGL.GL import *
+from OpenGL.GLU import *
 
 def _vec_cross(a,b):
     return ( \
@@ -14,6 +15,48 @@ def _vec_normalise(v):
     if l > 0:
         return (v[0]/l,v[1]/l,v[2]/l)
     return v
+    
+def _ray_triangle(R,T):
+    # http://softsurfer.com/Archive/algorithm_0105/algorithm_0105.htm#intersect_RayTriangle%28%29
+    # get triangle edge vectors and plane normal
+    u = T[1]-T[0]
+    v = T[2]-T[0]
+    n = numpy.cross(u,v) ### cross product
+    if n[0]==0 and n[1]==0 and n[2]==0:            # triangle is degenerate
+        raise Exception("%s %s %s %s %s"%(R,T,u,v,n))
+        return (-1,None)                 # do not deal with this case
+    d = R[1]-R[0]             # ray direction vector
+    w0 = R[0]-T[0]
+    a = -numpy.dot(n,w0)
+    b = numpy.dot(n,d)
+    if math.fabs(b) < 0.00000001:     # ray is parallel to triangle plane
+        if (a == 0):              # ray lies in triangle plane
+            return (2,None)
+        return (0,None)             # ray disjoint from plane
+    # get intersect point of ray with triangle plane
+    r = a / b
+    if (r < 0.0):                   # ray goes away from triangle
+        return (0,None)                  # => no intersect
+    # for a segment, also test if (r > 1.0) => no intersect
+
+    I = R[0] + r * d           # intersect point of ray and plane
+    
+    # is I inside T?
+    uu = numpy.dot(u,u)
+    uv = numpy.dot(u,v)
+    vv = numpy.dot(v,v)
+    w = I - T[0]
+    wu = numpy.dot(w,u)
+    wv = numpy.dot(w,v)
+    D = uv * uv - uu * vv
+    # get and test parametric coords
+    s = (uv * wv - vv * wu) / D
+    if (s < 0.0 or s > 1.0):        # I is outside T
+        return (0,None)
+    t = (uv * wu - uu * wv) / D
+    if (t < 0.0 or (s + t) > 1.0):  # I is outside T
+        return (0,None)
+    return (1,I)                      # I is in T
 
 class IcoMesh:
 
@@ -22,7 +65,10 @@ class IcoMesh:
     def __init__(self,terrain,triangle,recursionLevel):
         self.terrain = terrain
         self.ID = len(terrain.meshes)
-        self.boundary = tuple(terrain.points[t] for t in triangle)
+        self.boundary = numpy.array( \
+            [(x,y,z,0) for x,y,z in [terrain.points[t] for t in triangle]],
+            dtype=numpy.float32)
+        self._projection = numpy.empty((len(triangle),4),dtype=numpy.float32)
         assert recursionLevel <= self.DIVIDE_THRESHOLD
         def num_points(recursionLevel):
             Nc = (15,45,153,561,2145,8385)
@@ -61,20 +107,60 @@ class IcoMesh:
             
     def _calc_normals(self):
         # do normals for all faces
+        points, normals = self.terrain.points, self.terrain.normals
+        bounds = self.bounds = numpy.array([[-1,-1,-1],[1,1,1]],dtype=numpy.float32)
         for i,f in enumerate(self.faces):
-            points, normals = self.terrain.points, self.terrain.normals
             a = _vec_ofs(points[f[2]],points[f[1]])
             b = _vec_ofs(points[f[0]],points[f[1]])
             pn = _vec_normalise(_vec_cross(a,b))            
             for f in f:
                 normals[f] += pn
+                for i in xrange(3):
+                    bounds[0,i] = max(bounds[0,i],points[f,i])
+                    bounds[1,i] = min(bounds[1,i],points[f,i])
+                
+    def project(self,modelview):
+        for i,pt in enumerate(self.boundary):
+            pt = (pt * modelview)
+            self._projection[i] = pt[0]
+        # cull those whose outline points away; will need to account for high mountains visible on the horizon etc too of course
+        if all(pt[2]<0. for pt in self._projection): return
+        return self._projection
+        
+    def contains_point(self,R,fast):
+        T = numpy.empty((3,3),dtype=numpy.float32)
+        def test(a,b,c):
+            T[:] = a,b,c
+            ret,I = _ray_triangle(R,T)
+            if ret == 1:
+                return I
+        if fast:
+            def bounds(x,y,z):
+                return (self.bounds[x,0],self.bounds[y,1],self.bounds[z,2])
+            tl,tr,br,bl,trb,brb,tlb,blb = ( \
+                (0,0,0),(1,0,0),(1,1,0),(0,1,0),
+                (0,0,1),(1,0,1),(1,1,1),(0,1,1))
+            intersects_bounds = False
+            for a,b,c,d in ((tl,tr,br,bl),(tr,trb,brb,br),(tl,tlb,blb,bl)):
+                a,b,c,d = bounds(*a),bounds(*b),bounds(*c),bounds(*d)
+                I = test(a,b,c)
+                if I is not None:
+                    intersects_bounds = True
+                    break
+                I = test(a,c,d)
+                if I is not None:
+                    intersects_bounds = True
+                    break
+            if not intersects_bounds:
+                return
+        P = self.terrain.points
+        for a,b,c in self.faces:
+            I = test(P[a],P[b],P[c])
+            if I is not None:
+                return I
         
     def init_gl(self):
         rnd = random.random
-        self.colour = (rnd(),rnd(),rnd(),1)
-        for f in self.faces:
-            for f in f:
-                self.terrain.colours[f] = self.colour
         self.indices = self.terrain._vbo(self.faces,GL_ELEMENT_ARRAY_BUFFER)
         self.num_indices = len(self.faces)*3
         
@@ -85,8 +171,11 @@ class IcoMesh:
 
 class Terrain:
     
+    WATER_LEVEL = 0.9
+    
     def __init__(self):
         self.meshes = []
+        self._selection = None
                 
     def create_ico(self,recursionLevel):
         t = (1.0 + math.sqrt(5.0)) / 2.0
@@ -96,7 +185,6 @@ class Terrain:
         self.adjacency = numpy.empty((len(self.points),6),dtype=numpy.int32)
         self.adjacency.fill(-1)
         self.normals = numpy.zeros((len(self.points),3),dtype=numpy.float32)
-        self.colours = numpy.zeros((len(self.points),4),dtype=numpy.float32)
         for p in ( \
                 (-1, t, 0),( 1, t, 0),(-1,-t, 0),( 1,-t, 0),
                 ( 0,-1, t),( 0, 1, t),( 0,-1,-t),( 0, 1,-t),
@@ -127,7 +215,7 @@ class Terrain:
         
         # quick test; make the map noisy
         for p in self.points:
-            adjust = 0.9 + random.random()*0.1
+            adjust = Terrain.WATER_LEVEL + random.random()*(1.-Terrain.WATER_LEVEL)
             p *= adjust
 
         # meshes apply their face normals to our vertices
@@ -139,6 +227,52 @@ class Terrain:
             f = 5 if self.adjacency[i,5] == -1 else 6
             np = self.normals[i] / f 
             self.normals[i] = _vec_normalise(np)
+            
+        # apply colour-scheme
+        self.colours = numpy.zeros((len(self.points),3),dtype=numpy.uint8)
+        heights = ( \
+            (1.,0xff,0xff,0xff),
+            (.8,0xdc,0xdc,0xdc),
+            (.5,0x00,0x7c,0x00),
+            (.3,0x22,0x8b,0x22),
+            (.1,0x00,0xff,0x00),
+            (0.,0x00,0x00,0xff))
+        for i,p in enumerate(self.points):
+            height = math.sqrt(sum(d**2 for d in p))
+            height -= Terrain.WATER_LEVEL
+            height *= 1./(1.-Terrain.WATER_LEVEL)
+            for val,r,g,b in heights:
+                if height > val:
+                    break
+            self.colours[i] = (r,g,b)
+            
+    def pick(self,x,y):
+        glScale(.8,.8,.8)
+        modelview = numpy.matrix(glGetDoublev(GL_MODELVIEW_MATRIX))
+        projection = numpy.matrix(glGetDoublev(GL_PROJECTION_MATRIX))
+        viewport = glGetIntegerv(GL_VIEWPORT)
+        R = numpy.array([gluUnProject(x,y,10,modelview,projection,viewport),
+            gluUnProject(x,y,-10,modelview,projection,viewport)],
+            dtype=numpy.float32)
+        def find(fast):
+            best = (-1000,None,None)
+            for mesh in self.meshes:
+                pt = mesh.contains_point(R,fast)
+                if pt is not None:
+                    ptz = (pt[0],pt[1],pt[2],0)
+                    z = (ptz * modelview)[0,2]
+                    if z > best[0]:
+                        best = (z,mesh,pt)                
+            return best
+        best = find(True)
+        self._selection = best[1]
+        # try and narrow down a bug in the bounds code
+        if self._selection is None:
+            best = find(False)
+            self._selection = best[1]
+            if self._selection is not None:
+                print "FAILURE!",best
+        return ([],[])
             
     def _vbo(self,array,target):
         handle = glGenBuffers(1)
@@ -185,23 +319,21 @@ class Terrain:
         glNormalPointer(GL_FLOAT,0,None)
         glEnableClientState(GL_COLOR_ARRAY)
         glBindBuffer(GL_ARRAY_BUFFER,self._vbo_colours)
-        glColorPointer(4,GL_FLOAT,0,None)
+        glColorPointer(3,GL_UNSIGNED_BYTE,0,None)
         glBindBuffer(GL_ARRAY_BUFFER,0)
         
         modelview = numpy.matrix(glGetDoublev(GL_MODELVIEW_MATRIX))
         culled = 0
         for mesh in self.meshes:
-            # cull those whose outline points away; will need to account for high mountains visible on the horizon etc too of course
-            cull = True
-            for pt in mesh.boundary:
-                pt = (pt[0],pt[1],pt[2],0) * modelview
-                if pt[0,2] > -0.1: # this ought to be based on height of highest peaks in that piece of terrain
-                    cull = False
-                    break
-            if cull:
+            if mesh.project(modelview) is None:
                 culled += 1
                 continue
+            if mesh == self._selection:
+                glDisableClientState(GL_COLOR_ARRAY)
+                glColor(1,0,0,1)
             mesh.draw_gl_ffp()
+            if mesh == self._selection:
+                glEnableClientState(GL_COLOR_ARRAY)
             
-        print (len(self.meshes)-culled),"drawn,",culled,"culled."
+        #print (len(self.meshes)-culled),"drawn,",culled,"culled."
 

@@ -3,7 +3,7 @@
 print "Creating terrain..."
 from terrain import Terrain
 terrain = Terrain()
-terrain.create_ico(4)
+terrain.create_ico(2)
 print "ok"
 
 import pygtk; pygtk.require('2.0')
@@ -22,7 +22,7 @@ vbox = gtk.VBox(False, 0)
 window.add(vbox)
 zpr = GLZPR()
 zpr.draw = terrain.draw_gl_ffp
-zpr._pick = lambda *args: ([],[])
+zpr._pick = lambda x,y,dx,dy,event: terrain.pick(x,y)
 zpr.pick = lambda *args: False
 def zpr_init():
     GLZPR.init(zpr)
