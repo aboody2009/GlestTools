@@ -2,6 +2,7 @@
 import numpy, math, random, sys
 from OpenGL.GL import *
 from OpenGL.GLU import *
+from OpenGL.GLUT import *
 
 def _vec_cross(a,b):
     return ( \
@@ -58,6 +59,33 @@ def _ray_triangle(R,T):
         return (0,None)
     return (1,I)                      # I is in T
 
+def _ray_sphere(ray_origin,ray_dir,sphere_centre,sphere_radius_sqrd): # ray, sphere-centre, radius
+    a = sum(_**2 for _ in ray_dir)
+    assert a > 0.
+    b = 2. * (numpy.dot(ray_dir,ray_origin) - numpy.dot(sphere_centre,ray_dir))
+    c = sum(_**2 for _ in (sphere_centre - ray_origin)) - sphere_radius_sqrd
+    disc = b * b - 4 * a * c
+    return (disc >= 0.)
+    
+class Bounds:
+    _Unbound = [[sys.maxint,sys.maxint,sys.maxint],[-sys.maxint,-sys.maxint,-sys.maxint]]
+    def __init__(self):
+        self._state = 0
+        self.bounds = numpy.array(self._Unbound,dtype=numpy.float32)
+    def add(self,pt):
+        assert self._state in (0,1)
+        self._state = 1
+        for i in xrange(3):
+            self.bounds[0,i] = min(self.bounds[0,i],pt[i])
+            self.bounds[1,i] = max(self.bounds[1,i],pt[i])
+    def fix(self):
+        assert self._state == 1
+        self._state = 2
+        self.sphere_centre = numpy.array([a+(b-a)/2 for a,b in zip(self.bounds[0],self.bounds[1])],dtype=numpy.float32)
+        self.sphere_radius_sqrd = sum(((a-b)/2)**2 for a,b in zip(self.bounds[0],self.bounds[1]))        
+    def ray_intersects_sphere(self,ray_origin,ray_dir):
+        return _ray_sphere(ray_origin,ray_dir,self.sphere_centre,self.sphere_radius_sqrd)
+
 class IcoMesh:
 
     DIVIDE_THRESHOLD = 4
@@ -68,6 +96,7 @@ class IcoMesh:
         self.boundary = numpy.array( \
             [(x,y,z,0) for x,y,z in [terrain.points[t] for t in triangle]],
             dtype=numpy.float32)
+        self.bounds = Bounds()
         self._projection = numpy.empty((len(triangle),4),dtype=numpy.float32)
         assert recursionLevel <= self.DIVIDE_THRESHOLD
         def num_points(recursionLevel):
@@ -108,16 +137,14 @@ class IcoMesh:
     def _calc_normals(self):
         # do normals for all faces
         points, normals = self.terrain.points, self.terrain.normals
-        bounds = self.bounds = numpy.array([[-1,-1,-1],[1,1,1]],dtype=numpy.float32)
         for i,f in enumerate(self.faces):
             a = _vec_ofs(points[f[2]],points[f[1]])
             b = _vec_ofs(points[f[0]],points[f[1]])
             pn = _vec_normalise(_vec_cross(a,b))            
             for f in f:
                 normals[f] += pn
-                for i in xrange(3):
-                    bounds[0,i] = max(bounds[0,i],points[f,i])
-                    bounds[1,i] = min(bounds[1,i],points[f,i])
+                self.bounds.add(points[f])
+        self.bounds.fix()
                 
     def project(self,modelview):
         for i,pt in enumerate(self.boundary):
@@ -127,32 +154,13 @@ class IcoMesh:
         if all(pt[2]<0. for pt in self._projection): return
         return self._projection
         
-    def contains_point(self,R,fast):
+    def ray_intersection(self,R):
         T = numpy.empty((3,3),dtype=numpy.float32)
         def test(a,b,c):
             T[:] = a,b,c
             ret,I = _ray_triangle(R,T)
             if ret == 1:
                 return I
-        if fast:
-            def bounds(x,y,z):
-                return (self.bounds[x,0],self.bounds[y,1],self.bounds[z,2])
-            tl,tr,br,bl,trb,brb,tlb,blb = ( \
-                (0,0,0),(1,0,0),(1,1,0),(0,1,0),
-                (0,0,1),(1,0,1),(1,1,1),(0,1,1))
-            intersects_bounds = False
-            for a,b,c,d in ((tl,tr,br,bl),(tr,trb,brb,br),(tl,tlb,blb,bl)):
-                a,b,c,d = bounds(*a),bounds(*b),bounds(*c),bounds(*d)
-                I = test(a,b,c)
-                if I is not None:
-                    intersects_bounds = True
-                    break
-                I = test(a,c,d)
-                if I is not None:
-                    intersects_bounds = True
-                    break
-            if not intersects_bounds:
-                return
         P = self.terrain.points
         for a,b,c in self.faces:
             I = test(P[a],P[b],P[c])
@@ -175,7 +183,7 @@ class Terrain:
     
     def __init__(self):
         self.meshes = []
-        self._selection = None
+        self._selection = self._selection_point = None
                 
     def create_ico(self,recursionLevel):
         t = (1.0 + math.sqrt(5.0)) / 2.0
@@ -251,27 +259,25 @@ class Terrain:
         modelview = numpy.matrix(glGetDoublev(GL_MODELVIEW_MATRIX))
         projection = numpy.matrix(glGetDoublev(GL_PROJECTION_MATRIX))
         viewport = glGetIntegerv(GL_VIEWPORT)
+        self._selection = self._selection_point = None
         R = numpy.array([gluUnProject(x,y,10,modelview,projection,viewport),
             gluUnProject(x,y,-10,modelview,projection,viewport)],
             dtype=numpy.float32)
-        def find(fast):
-            best = (-1000,None,None)
-            for mesh in self.meshes:
-                pt = mesh.contains_point(R,fast)
-                if pt is not None:
-                    ptz = (pt[0],pt[1],pt[2],0)
-                    z = (ptz * modelview)[0,2]
-                    if z > best[0]:
-                        best = (z,mesh,pt)                
-            return best
-        best = find(True)
-        self._selection = best[1]
-        # try and narrow down a bug in the bounds code
-        if self._selection is None:
-            best = find(False)
-            self._selection = best[1]
-            if self._selection is not None:
-                print "FAILURE!",best
+        ray_origin, ray_dir = R[0], R[1]-R[0]
+        candidates = []
+        for mesh in self.meshes:
+            if mesh.bounds.ray_intersects_sphere(ray_origin,ray_dir):
+                candidates.append(( \
+                    -sum((a-b)**2 for a,b in zip(mesh.bounds.sphere_centre,ray_origin)), # distance from ray
+                    mesh))
+        candidates.sort() # sort by distance, nearest first
+        for _,mesh in candidates:
+            I = mesh.ray_intersection(R)
+            if I is not None:
+                self._selection = mesh
+                self._selection_point = I
+                break
+                
         return ([],[])
             
     def _vbo(self,array,target):
@@ -311,6 +317,7 @@ class Terrain:
         glClearColor(1,1,1,1)
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT)
         glScale(.8,.8,.8)
+        glEnable(GL_CULL_FACE)
         glEnableClientState(GL_VERTEX_ARRAY)
         glBindBuffer(GL_ARRAY_BUFFER,self._vbo_vertices)
         glVertexPointer(3,GL_FLOAT,0,None)
@@ -321,7 +328,6 @@ class Terrain:
         glBindBuffer(GL_ARRAY_BUFFER,self._vbo_colours)
         glColorPointer(3,GL_UNSIGNED_BYTE,0,None)
         glBindBuffer(GL_ARRAY_BUFFER,0)
-        
         modelview = numpy.matrix(glGetDoublev(GL_MODELVIEW_MATRIX))
         culled = 0
         for mesh in self.meshes:
@@ -334,6 +340,13 @@ class Terrain:
             mesh.draw_gl_ffp()
             if mesh == self._selection:
                 glEnableClientState(GL_COLOR_ARRAY)
-            
+        if self._selection_point is not None:
+            glDisableClientState(GL_COLOR_ARRAY)
+            glDisableClientState(GL_VERTEX_ARRAY)
+            glDisableClientState(GL_NORMAL_ARRAY)
+            glColor(0,0,1,1)
+            glTranslate(*self._selection_point)
+            glutSolidSphere(0.03,20,20)
+        glDisable(GL_CULL_FACE)
         #print (len(self.meshes)-culled),"drawn,",culled,"culled."
 
