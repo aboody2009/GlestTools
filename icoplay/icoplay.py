@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 
+import pygtk; pygtk.require('2.0')
+import gtk, gtk.gdk as gdk, gtk.gtkgl as gtkgl, gtk.gdkgl as gdkgl, gobject
+from OpenGL.GL import *
+from OpenGL.GLU import *
+from OpenGL.GLUT import *
+
 print "Creating terrain..."
 from terrain import Terrain
 terrain = Terrain()
 terrain.create_ico(3)
 print "ok"
 
-import pygtk; pygtk.require('2.0')
-import gtk, gtk.gdk as gdk, gtk.gtkgl as gtkgl, gtk.gdkgl as gdkgl, gobject
-from OpenGL.GL import *
-from OpenGL.GLU import *
-from OpenGL.GLUT import *
 from zpr import GLZPR
 glutInit(())
 gtk.gdk.threads_init()
