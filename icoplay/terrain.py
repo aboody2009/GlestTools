@@ -17,7 +17,7 @@ def _vec_normalise(v):
         return (v[0]/l,v[1]/l,v[2]/l)
     return v
     
-def _ray_triangle(R,T):
+def _ray_triangle(ray_origin,ray_dir,T):
     # http://softsurfer.com/Archive/algorithm_0105/algorithm_0105.htm#intersect_RayTriangle%28%29
     # get triangle edge vectors and plane normal
     u = T[1]-T[0]
@@ -26,10 +26,9 @@ def _ray_triangle(R,T):
     if n[0]==0 and n[1]==0 and n[2]==0:            # triangle is degenerate
         raise Exception("%s %s %s %s %s"%(R,T,u,v,n))
         return (-1,None)                 # do not deal with this case
-    d = R[1]-R[0]             # ray direction vector
-    w0 = R[0]-T[0]
+    w0 = ray_origin-T[0]
     a = -numpy.dot(n,w0)
-    b = numpy.dot(n,d)
+    b = numpy.dot(n,ray_dir)
     if math.fabs(b) < 0.00000001:     # ray is parallel to triangle plane
         if (a == 0):              # ray lies in triangle plane
             return (2,None)
@@ -40,7 +39,7 @@ def _ray_triangle(R,T):
         return (0,None)                  # => no intersect
     # for a segment, also test if (r > 1.0) => no intersect
 
-    I = R[0] + r * d           # intersect point of ray and plane
+    I = ray_origin + r * ray_dir           # intersect point of ray and plane
     
     # is I inside T?
     uu = numpy.dot(u,u)
@@ -201,18 +200,18 @@ class IcoMesh:
             for f in f:
                 normals[f] += pn
         
-    def ray_intersection(self,R):
+    def ray_intersection(self,ray_origin,ray_dir):
         T = numpy.empty((3,3),dtype=numpy.float32)
         def test(a,b,c):
             T[:] = a,b,c
-            ret,I = _ray_triangle(R,T)
+            ret,I = _ray_triangle(ray_origin,ray_dir,T)
             if ret == 1:
                 return I
         P = self.terrain.points
-        for a,b,c in self.faces:
+        for i,(a,b,c) in enumerate(self.faces):
             I = test(P[a],P[b],P[c])
             if I is not None:
-                return I
+                return (self,I,i)
         
     def init_gl(self):
         rnd = random.random
@@ -335,11 +334,20 @@ class Terrain:
         modelview = numpy.matrix(glGetDoublev(GL_MODELVIEW_MATRIX))
         projection = numpy.matrix(glGetDoublev(GL_PROJECTION_MATRIX))
         viewport = glGetIntegerv(GL_VIEWPORT)
+        old_pt = self._selection_point
         self._selection = self._selection_point = None
         R = numpy.array([gluUnProject(x,y,10,modelview,projection,viewport),
             gluUnProject(x,y,-10,modelview,projection,viewport)],
             dtype=numpy.float32)
         ray_origin, ray_dir = R[0], R[1]-R[0]
+        I = self._ray_intersection(ray_origin,ray_dir)
+        if I is not None:
+            self._selection,self._selection_point,_ = I
+            if old_pt is not None:
+                self.route(old_pt,self._selection_point)
+        return ([],[])
+        
+    def _ray_intersection(self,ray_origin,ray_dir):
         candidates = []
         for mesh in self.meshes:
             if mesh.bounds.ray_intersects(ray_origin,ray_dir):
@@ -348,12 +356,28 @@ class Terrain:
                     mesh))
         candidates.sort() # sort by distance, nearest first
         for _,mesh in candidates:
-            I = mesh.ray_intersection(R)
-            if I is not None:
-                self._selection = mesh
-                self._selection_point = I
-                break
-        return ([],[])
+            I = mesh.ray_intersection(ray_origin,ray_dir)
+            if I is not None: return I
+        
+    def find_face_for_point(self,p):
+        return self._ray_intersection(numpy.zeros(3,dtype=numpy.float32),
+            numpy.array(_vec_normalise(p),dtype=numpy.float32))
+        
+    def route(self,start,end):
+        # use A*
+        I = self.find_face_for_point(start)
+        if I is None:
+            print "Bad route: no start face",start,end
+            return
+        start_face = (I[0].ID << Terrain.FACE_BITS)|I[2]
+        I = self.find_face_for_point(end)
+        if I is None:
+            print "Bad route: no end face",start,start_face,end
+            return
+        end_face = (I[0].ID << Terrain.FACE_BITS)|I[2]
+        closedset = set()
+        openset = set()
+        openset.add(start_face)
             
     def _vbo(self,array,target):
         handle = glGenBuffers(1)
