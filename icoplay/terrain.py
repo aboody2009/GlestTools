@@ -84,7 +84,13 @@ class Bounds:
         self.sphere_centre = numpy.array([a+(b-a)/2 for a,b in zip(self.bounds[0],self.bounds[1])],dtype=numpy.float32)
         self.sphere_radius_sqrd = sum(((a-b)/2)**2 for a,b in zip(self.bounds[0],self.bounds[1]))        
     def ray_intersects_sphere(self,ray_origin,ray_dir):
+        assert self._state == 2
         return _ray_sphere(ray_origin,ray_dir,self.sphere_centre,self.sphere_radius_sqrd)
+    def intersects_sphere(self,centre,radius):
+        assert self._state == 2
+        diameter_sqrd = (radius*2)**2
+        dist = sum((a-b)**2 for a,b in zip(centre,self.sphere_centre))
+        return dist < diameter_sqrd
 
 class IcoMesh:
 
@@ -148,6 +154,12 @@ class IcoMesh:
             add_adjacency_points(b,c)
             add_adjacency_points(c,b)
             
+    def calculate_bounds(self):
+        for f in self.faces:
+            for f in f:
+                self.bounds.add(self.terrain.points[f])
+        self.bounds.fix()
+            
     def _calc_normals(self):
         # do normals for all faces
         points, normals = self.terrain.points, self.terrain.normals
@@ -157,8 +169,6 @@ class IcoMesh:
             pn = _vec_normalise(_vec_cross(a,b))            
             for f in f:
                 normals[f] += pn
-                self.bounds.add(points[f])
-        self.bounds.fix()
                 
     def project(self,modelview):
         for i,pt in enumerate(self.boundary):
@@ -197,6 +207,9 @@ class Terrain:
     
     FACE_BITS = 18
     FACE_IDX = (1<<FACE_BITS)-1
+    
+    WATER = 0
+    LAND = 1
     
     def __init__(self):
         self.meshes = []
@@ -239,16 +252,20 @@ class Terrain:
         print sum(len(mesh.faces) for mesh in self.meshes),"faces",
         print "at",len(self.meshes[0].faces),"each."
         
+        print "terraforming..."
+        self._type = numpy.empty(len(self.points),dtype=numpy.uint8)
         for p in self.points:
             p *= Terrain.WATER_LEVEL
+        self._type.fill(Terrain.WATER)
         
-        old = len(self.points)
+        for mesh in self.meshes:
+            mesh.calculate_bounds()
         
-        self._adjacency_points_extra = {}
-        self._adjacency_faces_extra = {}
+        for _ in xrange(50):
+            self._spolge(random.randint(0,len(self.points)),random.random()*0.5,Terrain.LAND)
         
         # quick test; make the map noisy
-        self._rnd_ridge(int(random.random()*len(self.points)),15,1)
+        #self._rnd_ridge(int(random.random()*len(self.points)),5,1)
         
         assert(self.points_len == len(self.points))
         
@@ -258,68 +275,28 @@ class Terrain:
             mesh._calc_normals()
         # average vertex normals
         for i in xrange(len(self.points)):
-            if i in self._adjacency_points_extra:
-                f = len(self._adjacency_points_extra[i])
-            else:
-                f = sum(1 if a != -1 else 0 for a in self.adjacency_points[i])
+            f = sum(1 if a != -1 else 0 for a in self.adjacency_points[i])
             assert f >= 2 and f <= 6
             np = self.normals[i] / f 
             self.normals[i] = _vec_normalise(np)
             
         # apply colour-scheme
         self.colours = numpy.zeros((len(self.points),3),dtype=numpy.uint8)
-        heights = ( \
-            (1.,0xff,0xff,0xff),
-            (.8,0xdc,0xdc,0xdc),
-            (.5,0x00,0x7c,0x00),
-            (.3,0x22,0x8b,0x22),
-            (.1,0x00,0xff,0x00),
-            (0.,0x00,0x00,0xff))
-        for i,p in enumerate(self.points):
-            if i > old:
-                r,g,b = 0,0,0
-            else:
-                height = math.sqrt(sum(d**2 for d in p))
-                height -= Terrain.WATER_LEVEL
-                height *= 1./(1.-Terrain.WATER_LEVEL)
-                r,g,b = heights[0][1:] 
-                for val,r,g,b in heights[1:]:
-                    if height > val:
-                        break
-            self.colours[i] = (r,g,b)
+        colours = {Terrain.WATER:(0,0,0xff),Terrain.LAND:(0,0xff,0)}
+        for i,t in enumerate(self._type):
+            self.colours[i] = colours[t]
             
-    def _rnd_ridge(self,start,L,height):
-        pos = start
-        walk = (random.random(),random.random(),random.random())
-        for i in xrange(L):
-            # find two adjacent points that are nearest to direction
-            neighbours = []
-            for p in self.adjacency_points[pos]:
-                if p == -1:
-                    assert len(neighbours) >= 2, neighbours
-                    break
-                neighbours.append((-sum((a-b)**2 for a,b in zip(self.points[p],walk)),p))
-            neighbours.sort()
-            a,b,c = pos,neighbours[0][1],neighbours[1][1]
-            face = self._split(self.find_face(a,b,c))
-            def split_if_exists(a,b,not_c):
-                d = self.find_other_common_point(a,b,not_c,False)
-                if d is None: return
-                print "replacing",a,b,not_c,d
-                face = self.find_face(a,b,d)
-                self._split(face)
-            split_if_exists(a,b,c)
-            split_if_exists(b,c,a)
-            split_if_exists(a,c,b)
-            pos = self.midpoints[self._midpoint_key(b,c)]
-            pos = self.find_other_common_point(b,c,pos)
-            print a,b,c, pos
-            continue
-            for j in xrange(3):
-                h = math.sqrt(sum(_**2 for _ in self.points[pos]))
-                adjust = height/h
-                self.points[pos] *= adjust
-            pos = self.adjacency_points[pos,int(random.random()*3)]
+    def _spolge(self,centre,radius,typ):
+        centre = self.points[centre]
+        radius_sqrd = radius**2
+        for mesh in self.meshes:
+            if not mesh.bounds.intersects_sphere(centre,radius): continue
+            for face in mesh.faces:
+                for p in face:
+                    if self._type[p] == typ: continue
+                    dist_sqrd = sum((a-b)**2 for a,b in zip(self.points[p],centre))
+                    if dist_sqrd < radius_sqrd:
+                        self._type[p] = typ
             
     def pick(self,x,y):
         glScale(.8,.8,.8)
@@ -367,18 +344,13 @@ class Terrain:
     def _midpoint_key(self,a,b):
         return (min(a,b) << 32) + max(a,b)
 
-    def _midpoint(self,a,b,extend=False):
+    def _midpoint(self,a,b):
         key = self._midpoint_key(a,b)
         if key not in self.midpoints:
-            a = self.points[a]
-            b = self.points[b]
-            mid = tuple((p1+p2)/2. for p1,p2 in zip(a,b))
-            if extend:
-                assert self.points_len == len(self.points)
-                self.points = numpy.resize(self.points,(self.points_len+1,3))
-                self._adjacency_points_extra[self.points_len] = []
-                self._adjacency_faces_extra[self.points_len] = []
-            self.midpoints[key] = self._addpoint(mid,not extend)
+            a_pt = self.points[a]
+            b_pt = self.points[b]
+            mid = tuple((p1+p2)/2. for p1,p2 in zip(a_pt,b_pt))
+            self.midpoints[key] = self._addpoint(mid,True)
         return self.midpoints[key]
         
     def find_face(self,a,b,c,insist=True):
@@ -398,9 +370,8 @@ class Terrain:
         
     def find_other_common_point(self,a,b,c,insist=True):
         points = self.adjacency_points
-        extra = self._adjacency_points_extra
-        point = set(extra[a] if a in extra else points[a])
-        point &= set(extra[b] if b in extra else points[b])
+        point = set(points[a])
+        point &= set(points[b])
         if len(point) == 0:
             assert not insist
             return
@@ -408,76 +379,7 @@ class Terrain:
             p = point.pop()
             if p in (-1,c): continue
             return p
-        
-    def _split(self,tri):
-        ID = tri >> Terrain.FACE_BITS
-        face = tri & Terrain.FACE_IDX
-        mesh = self.meshes[ID]
-        tri = mesh.faces[face]
-        print ID,face,tri
-        def rewrite(array,extra,a,b,c):
-            if a in extra:
-                for i,v in enumerate(extra[a]):
-                    if v == b:
-                        extra[a][i] = c
-                        return
-                assert False, "%s %s %s %s"%(a,extra[a],b,c)
-            else:
-                for i in xrange(6):
-                    if array[a,i] == b:
-                        array[a,i] = c
-                        return
-                    assert array[a,i] != -1
-                assert False, "%s %s %s %s"%(a,array[a],b,c)
-        def add(array,extra,a,b,strict=True):
-            if a in extra:
-                if b in extra[a]:
-                    assert not strict
-                else:
-                    extra[a].append(b)
-            else:
-                for i in xrange(6):
-                    if array[a,i] == -1:
-                        array[a,i] = b
-                        return
-                    if array[a,i] == b:
-                        assert not strict
-                        return
-                print "spill",a,array[a],b
-                extra[a] = []
-                for c in array[a]:
-                    extra[a].append(c)
-                extra[a].append(b)
-        def split_point(a,b):
-            c = self._midpoint(a,b,True)
-            rewrite(self.adjacency_points,self._adjacency_points_extra,a,b,c)
-            rewrite(self.adjacency_points,self._adjacency_points_extra,b,a,c)
-            add(self.adjacency_points,self._adjacency_points_extra,c,a,False)
-            add(self.adjacency_points,self._adjacency_points_extra,c,b,False)
-            return c
-        def rewrite_face(a,x):
-            rewrite(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|face,(ID<<Terrain.FACE_BITS)|(len(mesh.faces)-x))
-        def add_adjacency_faces(a):
-            add(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|face)
-            add(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|(len(mesh.faces)-3))
-            add(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|(len(mesh.faces)-2))
-            add(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|(len(mesh.faces)-1))
-        a = split_point(tri[0],tri[1])
-        b = split_point(tri[1],tri[2])
-        c = split_point(tri[2],tri[0])
-        mesh.faces = numpy.resize(mesh.faces,(len(mesh.faces)+3,3))
-        mesh.faces[-3] = (tri[0],a,c)
-        rewrite_face(tri[0],-3)
-        mesh.faces[-2] = (tri[1],b,a)
-        rewrite_face(tri[1],-2)
-        mesh.faces[-1] = (tri[2],c,b)
-        rewrite_face(tri[2],-1)
-        abc = (a,b,c)
-        mesh.faces[face] = abc
-        for _ in abc:
-            add_adjacency_faces(_)
-        return abc
-        
+                
     def init_gl(self):
         for mesh in self.meshes:
             mesh.init_gl()
