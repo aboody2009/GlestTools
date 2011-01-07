@@ -58,6 +58,36 @@ def _ray_triangle(R,T):
     if (t < 0.0 or (s + t) > 1.0):  # I is outside T
         return (0,None)
     return (1,I)                      # I is in T
+    
+def _ray_axis_aligned_bounding_box(O,D,C,e):
+    parallel = 0
+    found = False
+    d = C - O
+    for i in xrange(3):
+        if (math.fabs(D[i]) < .000001):
+            parallel |= 1 << i
+        else:
+            es = e[i] if (D[i] > 0.) else -e[i]
+            invDi = 1. / D[i]
+            if not found:
+                t0 = (d[i] - es) * invDi
+                t1 = (d[i] + es) * invDi
+                found = True
+            else:
+                s = (d[i] - es) * invDi
+                if (s > t0):
+                    t0 = s
+                s = (d[i] + es) * invDi
+                if (s < t1):
+                    t1 = s
+                if (t0 > t1):
+                    return False    
+    if (parallel>0):
+        for i in xrange(3):
+            if (parallel & (1 << i)):
+                if (math.fabs(d[i] - t0 * D[i]) > e[i]) or (math.fabs(d[i] - t1 * D[i]) > e[i]):
+                    return False
+    return True
 
 def _ray_sphere(ray_origin,ray_dir,sphere_centre,sphere_radius_sqrd): # ray, sphere-centre, radius
     a = sum(_**2 for _ in ray_dir)
@@ -69,32 +99,32 @@ def _ray_sphere(ray_origin,ray_dir,sphere_centre,sphere_radius_sqrd): # ray, sph
     
 class Bounds:
     _Unbound = [[sys.maxint,sys.maxint,sys.maxint],[-sys.maxint,-sys.maxint,-sys.maxint]]
-    def __init__(self):
-        self._state = 0
-        self.bounds = numpy.array(self._Unbound,dtype=numpy.float32)
+    def __init__(self,ID):
+        self.ID = ID
+        self.bounds = numpy.array(Bounds._Unbound,dtype=numpy.float32)
+    def reset(self):
+        self.bounds.setflags(write=True)
+        self.bounds[:] = Bounds._Unbound
     def add(self,pt):
-        assert self._state in (0,1)
-        self._state = 1
         for i in xrange(3):
             self.bounds[0,i] = min(self.bounds[0,i],pt[i])
             self.bounds[1,i] = max(self.bounds[1,i],pt[i])
     def fix(self):
-        assert self._state == 1
-        self._state = 2
+        self.bounds.setflags(write=False)
         self.sphere_centre = numpy.array([a+(b-a)/2 for a,b in zip(self.bounds[0],self.bounds[1])],dtype=numpy.float32)
         self.sphere_radius_sqrd = sum(((a-b)/2)**2 for a,b in zip(self.bounds[0],self.bounds[1]))        
-    def ray_intersects_sphere(self,ray_origin,ray_dir):
-        assert self._state == 2
-        return _ray_sphere(ray_origin,ray_dir,self.sphere_centre,self.sphere_radius_sqrd)
+    def ray_intersects(self,ray_origin,ray_dir):
+        return \
+            _ray_sphere(ray_origin,ray_dir,self.sphere_centre,self.sphere_radius_sqrd) and \
+            _ray_axis_aligned_bounding_box(ray_origin,ray_dir,self.bounds[0],self.bounds[1]-self.bounds[0])
     def intersects_sphere(self,centre,radius):
-        assert self._state == 2
         diameter_sqrd = (radius*2)**2
         dist = sum((a-b)**2 for a,b in zip(centre,self.sphere_centre))
         return dist < diameter_sqrd
 
 class IcoMesh:
 
-    DIVIDE_THRESHOLD = 4
+    DIVIDE_THRESHOLD = 3
     
     def __init__(self,terrain,triangle,recursionLevel):
         self.terrain = terrain
@@ -102,7 +132,7 @@ class IcoMesh:
         self.boundary = numpy.array( \
             [(x,y,z,0) for x,y,z in [terrain.points[t] for t in triangle]],
             dtype=numpy.float32)
-        self.bounds = Bounds()
+        self.bounds = Bounds(self.ID)
         self._projection = numpy.empty((len(triangle),4),dtype=numpy.float32)
         assert recursionLevel <= self.DIVIDE_THRESHOLD
         def num_points(recursionLevel):
@@ -155,6 +185,7 @@ class IcoMesh:
             add_adjacency_points(c,b)
             
     def calculate_bounds(self):
+        self.bounds.reset()
         for f in self.faces:
             for f in f:
                 self.bounds.add(self.terrain.points[f])
@@ -169,14 +200,6 @@ class IcoMesh:
             pn = _vec_normalise(_vec_cross(a,b))            
             for f in f:
                 normals[f] += pn
-                
-    def project(self,modelview):
-        for i,pt in enumerate(self.boundary):
-            pt = (pt * modelview)
-            self._projection[i] = pt[0]
-        # cull those whose outline points away; will need to account for high mountains visible on the horizon etc too of course
-        if all(pt[2]<0. for pt in self._projection): return
-        return self._projection
         
     def ray_intersection(self,R):
         T = numpy.empty((3,3),dtype=numpy.float32)
@@ -203,6 +226,7 @@ class IcoMesh:
 
 class Terrain:
     
+    LAND_LEVEL = 0.93
     WATER_LEVEL = 0.9
     
     FACE_BITS = 18
@@ -252,23 +276,28 @@ class Terrain:
         print sum(len(mesh.faces) for mesh in self.meshes),"faces",
         print "at",len(self.meshes[0].faces),"each."
         
+        assert(self.points_len == len(self.points))
+
         print "terraforming..."
         self._type = numpy.empty(len(self.points),dtype=numpy.uint8)
-        for p in self.points:
-            p *= Terrain.WATER_LEVEL
         self._type.fill(Terrain.WATER)
         
         for mesh in self.meshes:
             mesh.calculate_bounds()
         
         for _ in xrange(50):
-            self._spolge(random.randint(0,len(self.points)),random.random()*0.5,Terrain.LAND)
+            self._spolge(random.randint(0,len(self.points)-1),random.random()*0.5,Terrain.LAND)
+            
+        for i,p in enumerate(self.points):
+            typ = self._type[i]
+            if typ == Terrain.LAND:
+                p *= Terrain.LAND_LEVEL
+            elif typ == Terrain.WATER:
+                p *= Terrain.WATER_LEVEL
         
-        # quick test; make the map noisy
-        #self._rnd_ridge(int(random.random()*len(self.points)),5,1)
-        
-        assert(self.points_len == len(self.points))
-        
+        for mesh in self.meshes:
+            mesh.calculate_bounds()
+
         # meshes apply their face normals to our vertices
         self.normals = numpy.zeros((len(self.points),3),dtype=numpy.float32)
         for mesh in self.meshes:
@@ -277,14 +306,17 @@ class Terrain:
         for i in xrange(len(self.points)):
             f = sum(1 if a != -1 else 0 for a in self.adjacency_points[i])
             assert f >= 2 and f <= 6
-            np = self.normals[i] / f 
+            np = self.normals[i] / f
             self.normals[i] = _vec_normalise(np)
             
         # apply colour-scheme
         self.colours = numpy.zeros((len(self.points),3),dtype=numpy.uint8)
         colours = {Terrain.WATER:(0,0,0xff),Terrain.LAND:(0,0xff,0)}
-        for i,t in enumerate(self._type):
-            self.colours[i] = colours[t]
+        for i,(t,p) in enumerate(zip(self._type,self.points)):
+            if (p[1] > .8) or (p[1] < -.8): # poles
+                self.colours[i] = (0xff,0xff,0xff)
+            else:
+                self.colours[i] = colours[t]
             
     def _spolge(self,centre,radius,typ):
         centre = self.points[centre]
@@ -310,7 +342,7 @@ class Terrain:
         ray_origin, ray_dir = R[0], R[1]-R[0]
         candidates = []
         for mesh in self.meshes:
-            if mesh.bounds.ray_intersects_sphere(ray_origin,ray_dir):
+            if mesh.bounds.ray_intersects(ray_origin,ray_dir):
                 candidates.append(( \
                     -sum((a-b)**2 for a,b in zip(mesh.bounds.sphere_centre,ray_origin)), # distance from ray
                     mesh))
@@ -403,11 +435,7 @@ class Terrain:
         glColorPointer(3,GL_UNSIGNED_BYTE,0,None)
         glBindBuffer(GL_ARRAY_BUFFER,0)
         modelview = numpy.matrix(glGetDoublev(GL_MODELVIEW_MATRIX))
-        culled = 0
         for mesh in self.meshes:
-            if mesh.project(modelview) is None:
-                culled += 1
-                continue
             if mesh == self._selection:
                 glDisableClientState(GL_COLOR_ARRAY)
                 glColor(1,0,0,1)
@@ -422,5 +450,4 @@ class Terrain:
             glTranslate(*self._selection_point)
             glutSolidSphere(0.03,20,20)
         glDisable(GL_CULL_FACE)
-        #print (len(self.meshes)-culled),"drawn,",culled,"culled."
 

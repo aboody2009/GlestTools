@@ -9,7 +9,7 @@ from OpenGL.GLUT import *
 print "Creating terrain..."
 from terrain import Terrain
 terrain = Terrain()
-terrain.create_ico(3)
+terrain.create_ico(4)
 print "ok"
 
 from zpr import GLZPR
