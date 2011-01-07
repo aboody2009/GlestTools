@@ -244,6 +244,9 @@ class Terrain:
         
         old = len(self.points)
         
+        self._adjacency_points_extra = {}
+        self._adjacency_faces_extra = {}
+        
         # quick test; make the map noisy
         self._rnd_ridge(int(random.random()*len(self.points)),15,1)
         
@@ -255,8 +258,11 @@ class Terrain:
             mesh._calc_normals()
         # average vertex normals
         for i in xrange(len(self.points)):
-            f = sum(1 if a != -1 else 0 for a in self.adjacency_points[i])
-            assert self.adjacency_points[i,1] != -1,"%s %s %s"%(i,self.adjacency_points[i],f)
+            if i in self._adjacency_points_extra:
+                f = len(self._adjacency_points_extra[i])
+            else:
+                f = sum(1 if a != -1 else 0 for a in self.adjacency_points[i])
+            assert f >= 2 and f <= 6
             np = self.normals[i] / f 
             self.normals[i] = _vec_normalise(np)
             
@@ -296,6 +302,15 @@ class Terrain:
             neighbours.sort()
             a,b,c = pos,neighbours[0][1],neighbours[1][1]
             face = self._split(self.find_face(a,b,c))
+            def split_if_exists(a,b,not_c):
+                d = self.find_other_common_point(a,b,not_c,False)
+                if d is None: return
+                print "replacing",a,b,not_c,d
+                face = self.find_face(a,b,d)
+                self._split(face)
+            split_if_exists(a,b,c)
+            split_if_exists(b,c,a)
+            split_if_exists(a,c,b)
             pos = self.midpoints[self._midpoint_key(b,c)]
             pos = self.find_other_common_point(b,c,pos)
             print a,b,c, pos
@@ -361,28 +376,36 @@ class Terrain:
             if extend:
                 assert self.points_len == len(self.points)
                 self.points = numpy.resize(self.points,(self.points_len+1,3))
-                self.adjacency_faces = numpy.resize(self.adjacency_faces,(self.points_len+1,6))
-                self.adjacency_faces[-1].fill(-1)
-                self.adjacency_points = numpy.resize(self.adjacency_points,(self.points_len+1,6))
-                self.adjacency_points[-1].fill(-1)
+                self._adjacency_points_extra[self.points_len] = []
+                self._adjacency_faces_extra[self.points_len] = []
             self.midpoints[key] = self._addpoint(mid,not extend)
         return self.midpoints[key]
         
-    def find_face(self,a,b,c):
-        face = set(self.adjacency_faces[a])
-        face &= set(self.adjacency_faces[b])
-        face &= set(self.adjacency_faces[c])
+    def find_face(self,a,b,c,insist=True):
+        faces = self.adjacency_faces
+        extra = self._adjacency_faces_extra
+        face = set(extra[a] if a in extra else faces[a])
+        face &= set(extra[b] if b in extra else faces[b])
+        face &= set(extra[c] if c in extra else faces[c])
+        if len(face) == 0:
+            assert not insist,"Couldn't find face %s %s %s"%(a,b,c)
+            return
         f = face.pop()
         if f == -1:
             f = face.pop()
         assert len(face) == 0
         return f
         
-    def find_other_common_point(self,a,b,c):
-        points = set(self.adjacency_points[a])
-        points &= set(self.adjacency_points[b])
+    def find_other_common_point(self,a,b,c,insist=True):
+        points = self.adjacency_points
+        extra = self._adjacency_points_extra
+        point = set(extra[a] if a in extra else points[a])
+        point &= set(extra[b] if b in extra else points[b])
+        if len(point) == 0:
+            assert not insist
+            return
         while True:
-            p = points.pop()
+            p = point.pop()
             if p in (-1,c): continue
             return p
         
@@ -392,35 +415,53 @@ class Terrain:
         mesh = self.meshes[ID]
         tri = mesh.faces[face]
         print ID,face,tri
-        def rewrite(array,a,b,c):
-            for i in xrange(6):
-                if array[a,i] == b:
-                    array[a,i] = c
-                    return
-                assert array[a,i] != -1
-            assert False, "%s %s %s %s"%(a,array[a],b,c)
+        def rewrite(array,extra,a,b,c):
+            if a in extra:
+                for i,v in enumerate(extra[a]):
+                    if v == b:
+                        extra[a][i] = c
+                        return
+                assert False, "%s %s %s %s"%(a,extra[a],b,c)
+            else:
+                for i in xrange(6):
+                    if array[a,i] == b:
+                        array[a,i] = c
+                        return
+                    assert array[a,i] != -1
+                assert False, "%s %s %s %s"%(a,array[a],b,c)
+        def add(array,extra,a,b,strict=True):
+            if a in extra:
+                if b in extra[a]:
+                    assert not strict
+                else:
+                    extra[a].append(b)
+            else:
+                for i in xrange(6):
+                    if array[a,i] == -1:
+                        array[a,i] = b
+                        return
+                    if array[a,i] == b:
+                        assert not strict
+                        return
+                print "spill",a,array[a],b
+                extra[a] = []
+                for c in array[a]:
+                    extra[a].append(c)
+                extra[a].append(b)
         def split_point(a,b):
             c = self._midpoint(a,b,True)
-            if c == self.points_len-1:
-                self.adjacency_points[-1,0] = a
-                self.adjacency_points[-1,1] = b
-                rewrite(self.adjacency_points,a,b,c)
-                rewrite(self.adjacency_points,b,a,c)
+            rewrite(self.adjacency_points,self._adjacency_points_extra,a,b,c)
+            rewrite(self.adjacency_points,self._adjacency_points_extra,b,a,c)
+            add(self.adjacency_points,self._adjacency_points_extra,c,a,False)
+            add(self.adjacency_points,self._adjacency_points_extra,c,b,False)
             return c
         def rewrite_face(a,x):
-            rewrite(self.adjacency_faces,a,(ID << Terrain.FACE_BITS)|face,(ID << Terrain.FACE_BITS)|(len(mesh.faces)-x))
+            rewrite(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|face,(ID<<Terrain.FACE_BITS)|(len(mesh.faces)-x))
         def add_adjacency_faces(a):
-            def add(b):
-                b |= (ID << Terrain.FACE_BITS)
-                for i in xrange(6):
-                    if self.adjacency_faces[a,i] in (b,-1):
-                        self.adjacency_faces[a,i] = b
-                        return
-                assert False, "%s %s %s"%(a,self.adjacency_faces[a],b)
-            add(face)
-            add(len(mesh.faces)-3)
-            add(len(mesh.faces)-2)
-            add(len(mesh.faces)-1)
+            add(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|face)
+            add(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|(len(mesh.faces)-3))
+            add(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|(len(mesh.faces)-2))
+            add(self.adjacency_faces,self._adjacency_faces_extra,a,(ID<<Terrain.FACE_BITS)|(len(mesh.faces)-1))
         a = split_point(tri[0],tri[1])
         b = split_point(tri[1],tri[2])
         c = split_point(tri[2],tri[0])
