@@ -47,6 +47,8 @@ class Bounds:
         self.bounds[3] = max(self.bounds[3],bounds.bounds[3])
         self.bounds[4] = max(self.bounds[4],bounds.bounds[4])
         self.bounds[5] = max(self.bounds[5],bounds.bounds[5])
+    def diag(self):
+        return math.sqrt(sum((self.bounds[i]-self.bounds[i+3])**2 for i in xrange(3)))
     def size(self):
         w = self.bounds[3]-self.bounds[0]
         h = self.bounds[4]-self.bounds[1]
@@ -145,14 +147,14 @@ class Mesh(object):
             return
         try:
             vbo = self.g3d.mgr.make_vbo
-            verts = [vbo(v,GL.gl_ARRAY_BUFFER) for v in self.vertices]
-            norms = [vbo(n,GL.gl_ARRAY_BUFFER) for n in self.normals]
+            verts = [vbo(v,GL.GL_ARRAY_BUFFER) for v in self.vertices]
+            norms = [vbo(n,GL.GL_ARRAY_BUFFER) for n in self.normals]
             # indices is actually a list of trianGL.gles, so unpack it
             indices = repack(self.indices)
             self.num_indices = len(indices)
             assert self.num_indices == len(self.indices)*3 
-            indices = vbo(indices,GL.gl_ELEMENT_ARRAY_BUFFER)
-            txCoords = vbo(self.txCoords,GL.gl_ARRAY_BUFFER) if self.texture is not None else None
+            indices = vbo(indices,GL.GL_ELEMENT_ARRAY_BUFFER)
+            txCoords = vbo(self.txCoords,GL.GL_ARRAY_BUFFER) if self.texture is not None else None
             self.using_shaders = (indices,verts,norms,txCoords)
         except Exception as e:
             traceback.print_exc()
@@ -163,38 +165,38 @@ class Mesh(object):
         n = (p+1)%len(verts)
         f = i%1.
         if txCoords is None:
-            GL.glBindTexture(GL.gl_TEXTURE_2D,0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D,0)
             GL.glColor(0,1,0,1)
         else:
-            GL.glEnableClientState(GL.gl_TEXTURE_COORD_ARRAY)
-            GL.glBindBuffer(GL.gl_ARRAY_BUFFER,txCoords)
-            GL.glTexCoordPointer(2,GL.gl_FLOAT,0,None)
-            GL.glActiveTexture(GL.gl_TEXTURE0)
-            GL.glBindTexture(GL.gl_TEXTURE_2D,self.texture)
+            GL.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER,txCoords)
+            GL.glTexCoordPointer(2,GL.GL_FLOAT,0,None)
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D,self.texture)
             GL.glColor(1,1,1,1)
             if self.g3d.mgr.shaders:
                 GL.glUniform1i(self.g3d.mgr.uniform_tex,0)
         GL.glUniform1f(self.g3d.mgr.uniform_lerp,f)
-        GL.glBindBuffer(GL.gl_ARRAY_BUFFER,verts[p])
-        GL.glVertexPointer(3,GL.gl_FLOAT,0,None)
-        GL.glBindBuffer(GL.gl_ARRAY_BUFFER,norms[p])
-        GL.glNormalPointer(GL.gl_FLOAT,0,None)
-        GL.glBindBuffer(GL.gl_ARRAY_BUFFER,verts[n])
-        GL.glColorPointer(3,GL.gl_FLOAT,0,None)
-        GL.glBindBuffer(GL.gl_ELEMENT_ARRAY_BUFFER,indices)
-        GL.glDrawElements(GL_TRIANGLES,self.num_indices,GL.gl_UNSIGNED_INT,None)
-        GL.glBindBuffer(GL.gl_ARRAY_BUFFER,0)
-        GL.glBindBuffer(GL.gl_ELEMENT_ARRAY_BUFFER,0)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER,verts[p])
+        GL.glVertexPointer(3,GL.GL_FLOAT,0,None)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER,norms[p])
+        GL.glNormalPointer(GL.GL_FLOAT,0,None)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER,verts[n])
+        GL.glColorPointer(3,GL.GL_FLOAT,0,None)
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER,indices)
+        GL.glDrawElements(GL.GL_TRIANGLES,self.num_indices,GL.GL_UNSIGNED_INT,None)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER,0)
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER,0)
     def draw_gl_ffp(self,now):
         vertices, normals, textures = self.interop(now)
         if not self.g3d.mgr.render_normals: normals = None
         if textures is None:
-            GL.glBindTexture(GL.gl_TEXTURE_2D,0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D,0)
             GL.glColor(0,1,0,1)
-         else:
-            GL.glBindTexture(GL.gl_TEXTURE_2D,self.texture)
+        else:
+            GL.glBindTexture(GL.GL_TEXTURE_2D,self.texture)
             GL.glColor(1,1,1,1)
-        GL.glBegin(GL_TRIANGLES)
+        GL.glBegin(GL.GL_TRIANGLES)
         for j,i in enumerate(self.indices):
             for k in i:
                 if textures is not None:
@@ -262,7 +264,6 @@ class G3D:
         if f.read(3) != "G3D":
             raise Exception("%s is not a G3D file"%filename)
         self.ver = f.uint8()
-        print self.ver, 
         if self.ver == 3:
             meshCount = f.uint32()
             for mesh in xrange(meshCount):
@@ -279,8 +280,9 @@ class G3D:
         for mesh in self.meshes:
             for frame in mesh.bounds:
                 bounds.add_bounds(frame)
+        #### this scaling really needs working out
         x,y,z = bounds.centre()
-        s = 1.8/max(*bounds.size())
+        s = 2./bounds.diag()
         self.scaling = (x,y,z,s)
         self.frame_count = len(self.meshes[0].vertices)
         for mesh in self.meshes[1:]:
@@ -294,7 +296,7 @@ class G3D:
         for mesh in self.meshes:
             mesh.init_gl()
     def draw_gl(self,now):
-        GL.glBlendFunc(GL.gl_SRC_ALPHA,GL.gl_ONE_MINUS_SRC_ALPHA)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
         GL.glPushMatrix()
         GL.glInitNames(1)
         try:
@@ -308,7 +310,7 @@ class G3D:
             GL.glPopMatrix()
         
 class Manager:
-    def __init__(self,base_folder=os.getcwd(),shaders=False):
+    def __init__(self,base_folder=os.getcwd(),use_shaders=False):
         self.base_folder = base_folder
         self.meshes = {}
         self.mesh_reverse = {}
@@ -316,7 +318,7 @@ class Manager:
         self.models = {}
         self.opaque_textures = set()
         self._seq = 0
-        self.shaders = shaders
+        self.use_shaders = use_shaders
     def load_model(self,filename):
         filename = os.path.relpath(filename,self.base_folder)
         if filename not in self.models:
@@ -331,7 +333,7 @@ class Manager:
     def make_vbo(self,array,target):
         obj = self.assign_object()
         GL.glBindBuffer(target,obj)
-        GL.glBufferData(target,array,GL.gl_STATIC_DRAW)
+        GL.glBufferData(target,array,GL.GL_STATIC_DRAW)
         GL.glBindBuffer(target,0)
         return obj
     def assign_object(self):
@@ -347,11 +349,11 @@ class Manager:
         return self.mesh_reverse[v]
     def init_gl(self,render_speed = 10):
         self.render_speed = render_speed
-        GL.global GL.gl
-        GL.gl = __import__('OpenGL.GL',globals(),locals(),[],-1)
+        global GL
+        GL = __import__('OpenGL',globals(),locals()).GL
         self.render_normals = True
         self._load_textures_gl()
-        for model in self.models:
+        for model in self.models.values():
             model.init_gl()
     def _load_textures_gl(self):
         import Image
@@ -360,19 +362,21 @@ class Manager:
                 image = Image.open(filename)
                 w, h = image.size
                 try:
-                    image = image.tostring("raw","RGBA",0,-1)
-                    mode = GL.gl_RGBA
-                except:
-                    image = image.tostring("raw","RGB",0,-1)
-                    mode = GL.gl_RGB
+                    img = image.tostring("raw","RGBA",0,-1)
+                    mode = GL.GL_RGBA
+                except Exception as e:
+                    print e
+                    img = image.tostring("raw","RGB",0,-1)
+                    mode = GL.GL_RGB
                     self.opaque_textures.add(texture)
-                GL.glPixelStorei(GL.gl_UNPACK_ALIGNMENT,1)
-                GL.glBindTexture(GL.gl_TEXTURE_2D,texture)
-                GL.glTexParameterf(GL.gl_TEXTURE_2D,GL.gl_TEXTURE_WRAP_S,GL.gl_CLAMP)
-                GL.glTexParameterf(GL.gl_TEXTURE_2D,GL.gl_TEXTURE_WRAP_T,GL.gl_CLAMP)
-                GL.glTexParameterf(GL.gl_TEXTURE_2D,GL.gl_TEXTURE_MAG_FILTER,GL.gl_LINEAR)
-                GL.glTexParameterf(GL.gl_TEXTURE_2D,GL.gl_TEXTURE_MIN_FILTER,GL.gl_LINEAR)
-                GL.glTexImage2D(GL.gl_TEXTURE_2D,0,mode,w,h,0,mode,GL.gl_UNSIGNED_BYTE,image)
+                image = img
+                GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT,1)
+                GL.glBindTexture(GL.GL_TEXTURE_2D,texture)
+                GL.glTexParameterf(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_WRAP_S,GL.GL_CLAMP)
+                GL.glTexParameterf(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_WRAP_T,GL.GL_CLAMP)
+                GL.glTexParameterf(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_MAG_FILTER,GL.GL_LINEAR)
+                GL.glTexParameterf(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_MIN_FILTER,GL.GL_LINEAR)
+                GL.glTexImage2D(GL.GL_TEXTURE_2D,0,mode,w,h,0,mode,GL.GL_UNSIGNED_BYTE,image)
             except Exception,e:
                 print "Could not load texture",filename,"->",texture
                 print e
