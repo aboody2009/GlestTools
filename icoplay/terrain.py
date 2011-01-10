@@ -24,7 +24,7 @@ def _ray_triangle(ray_origin,ray_dir,T):
     v = T[2]-T[0]
     n = numpy.cross(u,v) ### cross product
     if n[0]==0 and n[1]==0 and n[2]==0:            # triangle is degenerate
-        raise Exception("%s %s %s %s %s"%(R,T,u,v,n))
+        raise Exception("%s %s %s %s %s %s"%(ray_origin,ray_dir,T,u,v,n))
         return (-1,None)                 # do not deal with this case
     w0 = ray_origin-T[0]
     a = -numpy.dot(n,w0)
@@ -225,8 +225,8 @@ class IcoMesh:
 
 class Terrain:
     
-    LAND_LEVEL = 0.93
-    WATER_LEVEL = 0.9
+    LAND_LEVEL = 0.97
+    WATER_LEVEL = 0.95
     
     FACE_BITS = 18
     FACE_IDX = (1<<FACE_BITS)-1
@@ -284,15 +284,17 @@ class Terrain:
         for mesh in self.meshes:
             mesh.calculate_bounds()
         
-        for _ in xrange(50):
-            self._spolge(random.randint(0,len(self.points)-1),random.random()*0.5,Terrain.LAND)
-            
-        for i,p in enumerate(self.points):
-            typ = self._type[i]
-            if typ == Terrain.LAND:
-                p *= Terrain.LAND_LEVEL
-            elif typ == Terrain.WATER:
-                p *= Terrain.WATER_LEVEL
+        if False:
+            for _ in xrange(50):
+                self._spolge(random.randint(0,len(self.points)-1),random.random()*0.5,Terrain.LAND)
+            for i,p in enumerate(self.points):
+                typ = self._type[i]
+                if typ == Terrain.LAND:
+                    p *= Terrain.LAND_LEVEL
+                elif typ == Terrain.WATER:
+                    p *= Terrain.WATER_LEVEL
+        else:
+            self._gen(500)           
         
         for mesh in self.meshes:
             mesh.calculate_bounds()
@@ -316,6 +318,39 @@ class Terrain:
                 self.colours[i] = (0xff,0xff,0xff)
             else:
                 self.colours[i] = colours[t]
+                
+    def _gen(self,iterations):
+        # http://freespace.virgin.net/hugo.elias/models/m_landsp.htm
+        n = numpy.empty(3,dtype=numpy.float32)
+        v = numpy.empty(3,dtype=numpy.float32)
+        adj = numpy.zeros(len(self.points),dtype=numpy.float32)
+        for it in xrange(iterations):
+            while True:
+                n[0] = (random.random()-.5)*2.
+                n[1] = (random.random()-.5)*2.
+                n[2] = (random.random()-.5)*2.
+                if sum(a**2 for a in n) > 0.:
+                    break
+            m = -1 if (random.random() > .5) else 1
+            for i,p in enumerate(self.points):
+                v[:] = p
+                v -= n
+                if numpy.dot(n,v) > 0:
+                    adj[i] += m
+                else:
+                    adj[i] -= m
+        mn, mx = min(adj), max(adj)
+        s = mx-mn
+        t = (1.-Terrain.WATER_LEVEL)*2
+        for i,a in enumerate(adj):
+            tmp = 1. - (((a-mn)/s) * t)
+            adj[i] = tmp
+        for i,(a,p) in enumerate(zip(adj,self.points)):
+            if a > Terrain.WATER_LEVEL:
+                self._type[i] = Terrain.LAND
+                p *= a
+            else:
+                p *= Terrain.WATER_LEVEL
             
     def _spolge(self,centre,radius,typ):
         centre = self.points[centre]
