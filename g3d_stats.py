@@ -179,7 +179,7 @@ class Mesh(object):
             return ret
         vertices = inter(self.vertices[p],self.vertices[n])
         normals = inter(self.normals[p],self.normals[n])
-        if self.txCoords is not None:
+        if (self.txCoords is not None) and self.g3d.mgr.render_textures:
             i = int((now*self.g3d.mgr.render_speed)%len(self.txCoords))
             textures = self.txCoords[i]
         else:
@@ -216,7 +216,7 @@ class Mesh(object):
         p = int(i)
         n = (p+1)%len(verts)
         f = i%1.
-        if txCoords is None:
+        if txCoords is None or not self.g3d.mgr.render_textures:
             glBindTexture(GL_TEXTURE_2D,0)
             glColor(0,1,0,1)
         else:
@@ -472,6 +472,7 @@ if __name__ == "__main__":
                     self._animating = False
                     self.render_speed = 10
                     self.render_normals = True
+                    self.render_textures = True
                     self.render_analysis = True
                     self.cull_faces = False
                     global use_shaders, use_vbros
@@ -482,7 +483,8 @@ if __name__ == "__main__":
                         self._pick = lambda *args: ([],[])
                 def init(self):
                     GLZPR.init(self)
-                    glEnable(GL_TEXTURE_2D)
+                    if self.render_textures:
+                        glEnable(GL_TEXTURE_2D)
                     glEnable(GL_ALPHA_TEST)
                     glAlphaFunc(GL_GREATER,.4)
                     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA)
@@ -539,7 +541,11 @@ if __name__ == "__main__":
                     if self.cull_faces:
                         glEnable(GL_CULL_FACE)
                     else:
-                        glDisable(GL_CULL_FACE)                    
+                        glDisable(GL_CULL_FACE)   
+                    if self.render_textures:
+                        glEnable(GL_TEXTURE_2D)
+                    else:
+                        glDisable(GL_TEXTURE_2D)
                     try:
                         if self.shaders:
                             glUseProgram(self.shader)
@@ -550,23 +556,36 @@ if __name__ == "__main__":
                     finally:
                         glUseProgram(0)
                 def keyPress(self,event):
+                    if event.keyval == gtk.keysyms.Escape:
+                        gtk.main_quit()
+                        return
+                    if event.keyval > 255:
+                        print "cannot handle key",event.keyval,"- type H for help"
+                        return
                     key = chr(event.keyval)
                     if key in ('n','N'):
                         self.render_normals = not self.render_normals
                         print "normals","ON" if self.render_normals else "OFF"
+                    elif key in ('t','T'):
+                        self.render_textures = not self.render_textures
+                        print "textures","ON" if self.render_textures else "OFF"
                     elif key in ('a','A'):
                         self.render_analysis = not self.render_analysis
                         print "analysis","ON" if self.render_analysis else "OFF"
                     elif key in ('c','C'):
                         self.cull_faces = not self.cull_faces
-                        print "cull-faces","ON" if self.cull_faces else "OFF" 
+                        print "cull-faces","ON" if self.cull_faces else "OFF"
+                    elif key in ('q','Q','x','X'):
+                        gtk.main_quit()
                     elif key in ('h','H'):
                         print "Help:"
                         print "\ta\tshow analysis"
+                        print "\tt\ttoggle textures"
                         print "\tn\ttoggle rendering of normals"
                         print "\tc\tglEnable(GL_CULL_FACE)"
+                        print "\tq/x\tquit"
                     else:
-                        print "unknown key",key,"- type H for help"
+                        print "unknown key",key,ord(key),"- type H for help"
                 def pick(self,event,nearest,hits):
                     if len(nearest) != 1:
                         self.selection = None 
