@@ -2,10 +2,18 @@
 
 if __name__ == "__main__":
     
+    print "G3D Thumbnail Generator by William Edwards"
+    
     import sys, getopt, os
     
-    if len(sys.argv) < 2:
-        print "usage: python g3d_thumb.py [file1.g3d] ... {fileN.g3d}"
+    if (len(sys.argv) < 2):
+        print """usage: python g3d_thumb.py {options} [file1.g3d] ... {fileN.g3d}
+options:
+    -w width
+    -h height
+    -b background-colour (rgb as 6 hexadecimal digits e.g. 00ff00 is green)
+    -p pose (three rotations - x,y,z - separated by commas; default 0,130,0)
+    -o output-path (default is current folder)"""
         sys.exit(1)
     
     from OpenGL.GLUT import *
@@ -21,9 +29,24 @@ if __name__ == "__main__":
     background = (1.,.9,.9,1.) # rgba 1=0xff
     out_path = "." # folder (and file prefix) where the frames should be saved to
     
-    opts, args = getopt.getopt(sys.argv[1:],'')
+    opts, args = getopt.getopt(sys.argv[1:],'w:h:p:b:o:')
 
-    ### parse opts and override defaults
+    # parse opts and override defaults
+    for opt,val in opts:
+        if opt=="-w":
+            w = int(val)
+        elif opt=="-h":
+            h = int(val)
+        elif opt=="-p":
+            pose = [int(v) for v in val.split(",")]
+        elif opt=="-b":
+            r,g,b = int(val[:2],16),int(val[2:4],16),int(val[4:],16)
+            background = (float(r)/255,float(g)/255,float(b)/255,1.)
+        elif opt=="-o":
+            out_path = val
+        else:
+            print "unsupported option:",opt,val
+            sys.exit(1)
 
     for filename in args:
         if os.path.isfile(filename):
@@ -82,7 +105,7 @@ if __name__ == "__main__":
             frames.append(png)
             glutSwapBuffers()
         # convert to whatever
-        cmd = "convert -delay 1x10 -size %sx%s %s %s.gif"% \
+        cmd = "convert -delay 1x10 -size %sx%s -layers Optimize %s %s.gif"% \
             (w,h," ".join(frames),out_prefix)
         print cmd
         if 0 != os.system(cmd):
