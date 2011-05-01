@@ -8,6 +8,7 @@ make_glut()
 if len(sys.argv) < 2:
     sys.exit("usage: [path_to_techtree] {output_suffix}")
 path = sys.argv[1]
+path = os.path.realpath(path)
 if path[-1] in ('\\','/'): path = path[:-1]
 techtree = os.path.split(path)[1]
 
