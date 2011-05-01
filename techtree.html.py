@@ -27,7 +27,10 @@ for faction in os.listdir("%s/factions/"%path):
             filename,ext = os.path.splitext(model)
             if ext.lower() != ".g3d": continue
             filename_out = ("%s%s_"%(faction,suffix))+os.path.split(model)[1]+".gif"
-            thumb(filename_in,filename_out)
+            if not os.path.exists(filename_out) or \
+                (os.path.getmtime(filename_out) < os.path.getmtime(filename_in)):
+                # avoid recreating thumbnails from previous runs unnecessarily
+                thumb(filename_in,filename_out)
             page.write("<td><img src=\"%s\"/>"%filename_out)
     page.write("</table>")
 

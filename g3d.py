@@ -294,9 +294,12 @@ class G3D:
         x,y,z = bounds.centre()
         s = 2./bounds.diag()
         self.scaling = (x,y,z,s)
-        self.frame_count = len(self.meshes[0].vertices)
-        for mesh in self.meshes[1:]:
-            assert len(mesh.vertices) == self.frame_count
+        if self.meshes:
+            self.frame_count = len(self.meshes[0].vertices)
+            for mesh in self.meshes[1:]:
+                assert len(mesh.vertices) == self.frame_count
+        else:
+            self.frame_count = 0
     def assign_texture(self,texture):
         while texture.startswith("\\") or texture.startswith("/"):
             texture = texture[1:]
