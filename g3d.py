@@ -188,23 +188,29 @@ class Mesh(object):
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER,0)
         GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER,0)
     def draw_gl_ffp(self,now):
+        def draw():
+            GL.glBegin(GL.GL_TRIANGLES)
+            for j,i in enumerate(self.indices):
+                for k in i:
+                    if textures is not None:
+                        GL.glTexCoord(*textures[k])
+                    if normals is not None:
+                        GL.glNormal(*normals[k])
+                    GL.glVertex(*vertices[k])
+            GL.glEnd()
         vertices, normals, textures = self.interop(now)
         if not self.g3d.mgr.render_normals: normals = None
-        if textures is None:
-            GL.glBindTexture(GL.GL_TEXTURE_2D,0)
-            GL.glColor(0,1,0,1)
+        GL.glBindTexture(GL.GL_TEXTURE_2D,self.texture if textures is not None else 0)
+        (GL.glDisable if self.twoSided else GL.glEnable)(GL.GL_CULL_FACE)
+        if self.customColor:
+            GL.glColor(1,0,0,1)
+            GL.glTexEnvi(GL.GL_TEXTURE_ENV,GL.GL_TEXTURE_ENV_MODE,GL.GL_DECAL)
         else:
-            GL.glBindTexture(GL.GL_TEXTURE_2D,self.texture)
             GL.glColor(1,1,1,1)
-        GL.glBegin(GL.GL_TRIANGLES)
-        for j,i in enumerate(self.indices):
-            for k in i:
-                if textures is not None:
-                    GL.glTexCoord(*textures[k])
-                if normals is not None:
-                    GL.glNormal(*normals[k])
-                GL.glVertex(*vertices[k])
-        GL.glEnd()
+            GL.glTexEnvi(GL.GL_TEXTURE_ENV,GL.GL_TEXTURE_ENV_MODE,GL.GL_BLEND)
+        draw()
+        GL.glDisable(GL.GL_CULL_FACE)
+        GL.glBindTexture(GL.GL_TEXTURE_2D,0)
         
 class Mesh3(Mesh):
     def __init__(self,g3d,f):
@@ -216,6 +222,8 @@ class Mesh3(Mesh):
         vertexCount = f.uint32()
         indexCount = f.uint32()
         properties = f.uint32()
+        self.customColor = (properties & 4) == 4
+        self.twoSided = (properties & 2) == 2
         texture = f.text64()
         if 0 == (properties & 1):
             self.texture = g3d.assign_texture(texture)
@@ -241,6 +249,8 @@ class Mesh4(Mesh):
         indexCount = f.uint32()
         f.read(8*4)
         self.properties = properties = f.uint32()
+        self.customColor = (properties & 1) == 1
+        self.twoSided = (properties & 2) == 2
         self.textures = textures = f.uint32()
         for t in xrange(5):
             if ((1 << t) & textures) != 0:
@@ -355,6 +365,7 @@ class Manager:
         self._load_textures_gl()
         for model in self.models.values():
             model.init_gl()
+        GL.glMaterialfv(GL.GL_FRONT,GL.GL_AMBIENT_AND_DIFFUSE,(1.,0.,0.,1.))
     def _load_textures_gl(self):
         import Image
         for filename,texture in self.textures.iteritems():
@@ -365,7 +376,6 @@ class Manager:
                     img = image.tostring("raw","RGBA",0,-1)
                     mode = GL.GL_RGBA
                 except Exception as e:
-                    print e
                     img = image.tostring("raw","RGB",0,-1)
                     mode = GL.GL_RGB
                     self.opaque_textures.add(texture)

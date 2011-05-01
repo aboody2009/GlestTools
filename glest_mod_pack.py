@@ -31,6 +31,16 @@ from struct import unpack
 from itertools import chain
 import zipfile, time
 
+# inject our logger
+class Tee:
+    def __init__(self,stdout,cc):
+        self.cc = cc
+        self.stdout = stdout
+    def write(self,string):
+        self.stdout.write(string)
+        self.cc.write(string)
+sys.stdout = Tee(sys.stdout,open("glest_mod_pack.log","w"))
+
 try:
     relpath2 = os.path.relpath
 except:
