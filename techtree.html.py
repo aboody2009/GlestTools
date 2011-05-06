@@ -18,6 +18,7 @@ page = open("%s%s.html"%(techtree,suffix),"w")
 page.write("<html><head><title>%s</title></head><body>"%techtree)
 
 for faction in os.listdir("%s/factions/"%path):
+    if not os.path.exists("%s/factions/%s/units"%(path,faction)): continue
     page.write("<h1>%s</h1><table>"%faction)
     for unit in os.listdir("%s/factions/%s/units"%(path,faction)):
         model_dir = "%s/factions/%s/units/%s/models/"%(path,faction,unit)
