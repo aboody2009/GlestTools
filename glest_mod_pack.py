@@ -396,7 +396,7 @@ class Mod:
         assert xml.documentElement.tagName == "unit", f
         for unit in chain(xml.documentElement.getElementsByTagName("unit"),
             xml.documentElement.getElementsByTagName("produced-unit")):
-            unit = unit.attributes["name"].value
+            unit = unit.attributes["value" if unit.parentNode.tagName=="units-carried" else "name"].value
             self.files.ref(File.UNIT,f.subpath("../%s/%s.xml"%(unit,unit)),f,unit)
         return f
     def _init_upgrade(self,f):
