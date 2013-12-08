@@ -4,7 +4,7 @@
 # this tool coalesces them.  This increases the possibilities for G3DHack optimisations
 # and reduces the number of draw calls needed to draw the model in-game.
 
-import struct, sys, os, getopt
+import struct, sys, os, getopt, math
 
 class Reader:
     def __init__(self,bytes):
@@ -84,9 +84,31 @@ class G3D:
             
     def __repr__(self):
         return self.name
+        
+    def analyse(self):
+        print "analysing duplication of vertices and triangles in meshes..."
+        for mesh in self.meshes:
+            print "\t",mesh.name
+            vertices = [[] for vertex in range(mesh.vertex_count)]
+            for frame in mesh.frames:
+                for i in range(mesh.vertex_count):
+                    vertices[i] += [round(j,4) for j in frame.vertices[i*3:i*3+3]]
+                    vertices[i] += [round(j,4) for j in frame.normals[i*3:i*3+3]]
+                    if mesh.texture:
+                        vertices[i] += [round(j,4) for j in mesh.textures[i*2:i*2+2]]
+            vertices = [tuple(vertex) for vertex in vertices]
+            unique = {vertex:i for i,vertex in reversed(list(enumerate(vertices)))}
+            mapping = [unique[vertex] for vertex in vertices]
+            print "\t\t",mesh.vertex_count-len(unique),"dup vertices"
+            triangles = set(tuple(sorted((mapping[j] for j in mesh.indices[i:i+3]))) for i in range(0,mesh.index_count,3))
+            print "\t\t",len(mesh.indices)/3-len(triangles),"dup triangles"
+            print "\t\t",len(filter(lambda i: mapping[i] != i,mesh.indices)),"dup indices are actually used"
+            print "\t\t",mesh.vertex_count-len(set(mesh.indices)),"un-used vertices"
             
     def auto_join_frames(self):
         print "auto-joining compatible meshes..."
+        print "### TODO account for opacity, z-order etc"
+        print "### selectable ought to be joinable if we have an int instead of a boolean"
         meshes = {}
         for mesh in self.meshes:
             key = (mesh.texture,mesh.frame_count,mesh.twoSided|mesh.customColour)
@@ -138,9 +160,9 @@ class G3D:
                 (mesh.name,mesh.frame_count,mesh.vertex_count,mesh.index_count)
         
 if __name__=="__main__":
-    opts, args = getopt.getopt(sys.argv[1:],None,("join","smooth"))
+    opts, args = getopt.getopt(sys.argv[1:],None,("join","smooth","analyse"))
     if len(args) not in (1,2):
-        sys.exit("usage: python %s {--join} {--smooth} [src] {dest}"%sys.argv[0])
+        sys.exit("usage: python %s {--join} {--analyse} {--smooth} [src] {dest}"%sys.argv[0])
     opts = dict(opts)
     src = args[0]
     print "loading",src,"..."
@@ -149,6 +171,8 @@ if __name__=="__main__":
     if "--join" in opts:
         g3d.auto_join_frames()
         g3d.desc()
+    if "--analyse" in opts:
+        g3d.analyse()
     if "--smooth" in opts:
         g3d.smooth_frames()
         g3d.desc()
